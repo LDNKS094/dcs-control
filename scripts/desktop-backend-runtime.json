@@ -1,0 +1,49 @@
+{
+  "sourceCommit": "6125a75b37f7e2a408e31934f4827e5660429203",
+  "files": [
+    {
+      "path": "OptiScaler/D3D12_OptiScaler/D3D12Core.dll",
+      "sha256": "07d286c306f8117321422affd9e6388c12d0fb4be1c7fc689d9e899324feeb24"
+    },
+    {
+      "path": "OptiScaler/nvngx_dlssnr.dll",
+      "sha256": "2bc19bc09a7b89dd44f73e2ac0108fcc586e2154bdd0830f242f4f040e28789f"
+    },
+    {
+      "path": "OptiScaler/nvngx_dlss.dll",
+      "sha256": "d00b5b0ab29c3ca101b70c3a5ecb3a01b7ef33766a3383a28a18623083e6123e"
+    },
+    {
+      "path": "OptiScaler/streamline/sl.interposer.dll",
+      "sha256": "b1d7395aebd7b9722841d64dcf7433680020b6a8e421f851c16d5ba0c2182edf"
+    },
+    {
+      "path": "OptiScaler/streamline/sl.common.dll",
+      "sha256": "38eea3b4209afc455636ea372b5933d65fcc13becec6c84d101dcfc4d8648f75"
+    },
+    {
+      "path": "OptiScaler/streamline/sl.dlss_g.dll",
+      "sha256": "3ed9538df724993bea8a050195a6a78b9c8c8a566d5b05ade477aab3c390e90f"
+    },
+    {
+      "path": "OptiScaler/streamline/sl.reflex.dll",
+      "sha256": "443577e869352436ff7ec8f4d9c90418d3e95368436ce219261e0f4f07a38122"
+    },
+    {
+      "path": "OptiScaler/streamline/sl.pcl.dll",
+      "sha256": "5698c38e722318681f215c9fe68e45b9bedd51378acc699d8eee26e961e57770"
+    },
+    {
+      "path": "OptiScaler/streamline/nvngx_dlssg.dll",
+      "sha256": "8d59d49b36410dd6b62fef2503a5871d347415bd85d943fa0848563a95dd50c7"
+    },
+    {
+      "path": "OptiScaler/amd_fidelityfx_loader_dx12.dll",
+      "sha256": "e2d85aa05a9bd9ed8b38935fdf5199372cca6f74c12015143bb6f945ee1608aa"
+    },
+    {
+      "path": "OptiScaler/amd_fidelityfx_framegeneration_dx12.dll",
+      "sha256": "02297beedd285e822d3a64f314cf00faf378dcec0edc47ff0c4dd71b3a8c2f18"
+    }
+  ]
+}

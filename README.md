@@ -1,5 +1,11 @@
 # DCS Control
 
+## DCS Control integration fork
+
+This fork adds **VDXR** with the [Cheeky DCS fork](https://github.com/LDNKS094/CheekyFoveatedDLSS) and **Desktop Enhanced** with the [OptiScaler NR DCS fork](https://github.com/LDNKS094/OptiScaler-DLSSNR-PreSR-Multipass). Both profiles are available in the same build from `integration`. The `main` branch follows [upstream DCS Control](https://github.com/NIGos/dcs-control).
+
+See [Integration build](docs/INTEGRATION_BUILD.md) for the pinned dependencies and build commands.
+
 A free Windows app for DCS World that runs **DLSS 5, frame generation and Quad Views foveated rendering together in VR** (Pimax), set up and launched with one button, and makes DCS run faster for every pilot, on a monitor or any headset.
 
 - **Every pilot** (monitor, Quest, Varjo, Reverb, Pimax…): **Engine Optimizations** remove CPU work inside DCS without changing the image, about **+50-60 % FPS** at a busy airfield when DCS is CPU-bound. Once applied they stay on every time DCS starts, also from Steam or a desktop shortcut.

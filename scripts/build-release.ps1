@@ -87,6 +87,14 @@ Copy-Item -LiteralPath (Join-Path $workspaceRoot 'artifacts/native/ofxr-djules75
 # DCS engine optimizations (scripts/build-dcsqvcull.ps1), installed in Saved Games\DCS\Scripts when the profile enables
 # them (the terrain prefetch fix included). Rebuilt and tested on every release so a stale DLL can never ship.
 Invoke-WithFreshTests { & (Join-Path $PSScriptRoot 'build-dcsqvcull.ps1') }
+& (Join-Path $PSScriptRoot 'build-dcsrender.ps1')
+New-Item -ItemType Directory -Path (Join-Path $payloadRoot 'components/dcsrender') -Force | Out-Null
+foreach ($filename in @('DcsRender.dll', 'DcsRender.lua')) {
+    $source = Join-Path $workspaceRoot ('artifacts/native/dcsrender/' + $filename)
+    $target = Join-Path $payloadRoot ('components/dcsrender/' + $filename)
+    Copy-Item -LiteralPath $source -Destination $target -Force
+    (Get-FileHash -LiteralPath $target -Algorithm SHA256).Hash.ToLowerInvariant() | Set-Content -LiteralPath ($target + '.sha256') -Encoding ascii
+}
 New-Item -ItemType Directory -Path (Join-Path $payloadRoot 'components/dcsqvcull') -Force | Out-Null
 foreach ($source in @('artifacts/native/dcsqvcull/DcsQvCull.dll','artifacts/native/dcsqvcull/DcsQvCullPayload.dll','native/dcsqvcull/lua/DcsQvCull.lua')) {
     $target = Join-Path $payloadRoot ('components/dcsqvcull/' + (Split-Path -Leaf $source))
