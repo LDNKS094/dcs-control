@@ -352,7 +352,7 @@ internal static class WebVerification
             var screenshots = new List<object>(); var index = 0;
             // Every page of the rail, in a fixed order (the first ten as before); a page added to app.js without being
             // listed here fails the run, so no page goes without screenshots.
-            string[] shotPages = ["overview","presets","guide","foveation","dlss","framegen","boost","engine","setup","diagnostics","recovery","pupil","visual","osd","support"];
+            string[] shotPages = ["overview","presets","guide","foveation","dlss","sr","framegen","boost","engine","setup","diagnostics","recovery","pupil","visual","osd","support"];
             var railPages = JsonSerializer.Deserialize<string[]>(JsonSerializer.Deserialize<string>(await core.ExecuteScriptAsync("JSON.stringify([...document.querySelectorAll('#pages > section.page')].map(s => s.id.slice(5)))"))!)!;
             if (railPages.Except(shotPages).ToArray() is { Length: > 0 } unlisted) throw new IOException("Pages without screenshots: " + string.Join(", ", unlisted));
             await core.ExecuteScriptAsync("window.screenshotDraft=window.dcsUi.draft();");
@@ -373,6 +373,8 @@ internal static class WebVerification
                         await core.ExecuteScriptAsync("window.renderRefreshPending=true;window.dcsUi.run('checkReadiness').finally(()=>window.renderRefreshPending=false)");
                         for (var wait = 0; wait < 300 && await core.ExecuteScriptAsync("window.renderRefreshPending") == "true"; wait++) await Task.Delay(20);
                     }
+                    if (page == "sr" && !scrolled)
+                        await core.ExecuteScriptAsync("window.dcsUi.adoptDraft({...window.screenshotDraft,profile:{...window.screenshotDraft.profile, runtime:'Vdxr', desktop:false, quadViews:'CheekyNative', gaze:'Fixed'}});");
                     // The scrolled view stays on the page just shown (its content already loaded) and scrolls the content area to its end.
                     await core.ExecuteScriptAsync(scrolled ? "(s=>{s.scrollTop=s.scrollHeight;})(document.getElementById('scrollArea'));" : "window.dcsUi.navigate("+JsonSerializer.Serialize(page)+");");
                     await Task.Delay(80);
@@ -382,11 +384,13 @@ internal static class WebVerification
                     if (scrolled && !parsed.RootElement.GetProperty("atBottom").GetBoolean()) throw new IOException("Web page did not scroll to its end: "+page);
                     if (parsed.RootElement.GetProperty("overflow").GetBoolean()) throw new IOException("Web page overflows: "+page+(scrolled ? " (scrolled)" : ""));
                     if (!parsed.RootElement.GetProperty("footerVisible").GetBoolean() || !parsed.RootElement.GetProperty("headerVisible").GetBoolean()) throw new IOException("Web workflow leaves the viewport: "+page+(scrolled ? " (scrolled)" : ""));
-                    // At the default window size the whole right panel (checklist, profile name, setup buttons) fits without scrolling.
-                    if ((width,height,scale) == (1320,920,1d) && !parsed.RootElement.GetProperty("panelFits").GetBoolean()) throw new IOException("The right panel scrolls at 1320 × 920: "+page);
+                    // At the default window size the top bar fits without scrolling.
+                    if ((width,height,scale) == (1320,920,1d) && !parsed.RootElement.GetProperty("panelFits").GetBoolean()) throw new IOException("The top bar scrolls at 1320 × 920: "+page);
                     var shot = index++; var path = output+$"-{shot}.png"; await using var stream = File.Create(path);
                     await core.CapturePreviewAsync(CoreWebView2CapturePreviewImageFormat.Png,stream);
                     screenshots.Add(new { index=shot,page,width,height,scale,scrolled,path,layout=parsed.RootElement.Clone() });
+                    if (page == "sr" && (scrolled || !scrolledToo))
+                        await core.ExecuteScriptAsync("window.dcsUi.adoptDraft(window.screenshotDraft);");
                 }
                 await core.ExecuteScriptAsync("document.getElementById('scrollArea').scrollTop=0;");
                 {

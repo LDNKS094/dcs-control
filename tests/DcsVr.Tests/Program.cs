@@ -1235,7 +1235,7 @@ Test("Optimizations only leaves DCS, its VR setting, runtime and layers as the u
     Make("desktop/components/dcsqvcull/DcsQvCullPayload.dll", "payload"); Make("desktop/components/dcsqvcull/DcsQvCull.lua", "-- hook");
     // No OpenXR runtime on this PC at all.
     var inventory = new InventorySnapshot { DcsExecutable = exe, OptionsPath = options };
-    var vr = new VrProfile { QuadViews = QuadProvider.QuadViewsFoveated, NeuralRendering = true, FrameGen = FrameGeneration.Nvidia, CpuBoost = true, EngineOptimizations = true, BoostPrefetch = PrefetchFix.Skip,
+    var vr = new VrProfile { QuadViews = QuadProvider.QuadViewsFoveated, NeuralRendering = true, FrameGen = FrameGeneration.Nvidia, CpuBoost = true, EngineOptimizations = true, BoostPrefetch = PrefetchFix.Skip, EngineReleaseIdleDlss = false,
         SmallDcsWindow = true, LowerMonitor = true, PauseTobiiDesktop = true, FpsLimit = FpsLimitMode.MatchRefresh, DisableDcsVSync = true };
     var desktop = ProfileValidation.ResolveFeatures(vr with { Desktop = true });
     // The VR settings stay in the profile for the next VR flight (an app restart, Pimax again); none of them runs.
@@ -1262,6 +1262,240 @@ Test("Optimizations only leaves DCS, its VR setting, runtime and layers as the u
     // A VR profile on the same PC still needs its runtime.
     try { planner.Build(ProfileValidation.ResolveFeatures(vr with { NeuralRendering = false }), inventory, Path.Combine(root, "desktop/managed-vr")); Require(false, "VR without a runtime must be refused"); }
     catch (InvalidDataException e) { Require(e.Message.Contains("OpenXR runtime")); }
+});
+Test("VDXR uses native quad views and optical flow frame generation, then restores the game", () =>
+{
+    var exe = Make("vdxr/game/bin/DCS.exe", "fixture");
+    var bin = Path.GetDirectoryName(exe)!;
+    var options = Make("vdxr/sg/DCS/Config/options.lua", Lua);
+    var originalOptions = File.ReadAllBytes(options);
+    var dxgi = Make("vdxr/game/bin/dxgi.dll", "the original loader");
+    var runtime = Make("vdxr/runtime/virtualdesktop-openxr.json", "{\"runtime\":{\"library_path\":\"virtualdesktop-openxr.dll\"}}");
+    Make("vdxr/runtime/virtualdesktop-openxr.dll", "fixture");
+    var cheeky = Path.Combine(root, "vdxr/components");
+    foreach (var file in new[] { "dxgi.dll", "CheekyFoveatedDLSS/CheekyFoveatedDLSSHost.dll", "CheekyFoveatedDLSS/CheekyFoveatedDLSSRuntime.dll", "nvngx_dlssg.dll" })
+        Make("vdxr/components/" + file, "managed " + file);
+    var layer = Make("vdxr/components/CheekyOpenXRLayer.dll", "managed OpenXR layer");
+    Make("vdxr/components/XR_APILAYER_CHEEKY_foveated_dlss.json", """
+        {"file_format_version":"1.0.0","api_layer":{"name":"XR_APILAYER_CHEEKY_foveated_dlss","library_path":"CheekyOpenXRLayer.dll","api_version":"1.0","implementation_version":"1","instance_extensions":[{"name":"XR_VARJO_quad_views","extension_version":"2"}],"disable_environment":"CHEEKY_OPENXR_LAYER_DISABLE"}}
+        """);
+    var profile = ProfileValidation.ResolveFeatures(new VrProfile { Id = "vdxr", Name = "VDXR", Runtime = RuntimeKind.Vdxr,
+        QuadViews = QuadProvider.CheekyNative, FrameGen = FrameGeneration.Nvidia, FrameGenFactor = 4, NeuralRendering = false,
+        VdxrMenuKey = "120:0",
+        VdxrFocusWidth = 32, VdxrFocusHeight = 45, VdxrFocusCustomBlend = true, VdxrFocusFeather = 8,
+        VdxrFocusCornerRadius = 12, VdxrFocusMatchColor = true, VdxrFocusMatchStereo = true, VdxrFocusReferenceDistance = .5,
+        VdxrFocusHeadOffset = true, VdxrFocusHorizontalBias = -35.5, VdxrFocusHorizontalAngleGain = .4, VdxrFocusHorizontalDeadzone = 2,
+        VdxrFocusVerticalBias = 35.5, VdxrFocusVerticalAngleGain = -.2, VdxrFocusVerticalDeadzone = 3,
+        HeadsetRefreshHz = 120, RefreshFromHeadset = false, FpsLimit = FpsLimitMode.MatchRefresh, Gaze = GazeMode.Fixed });
+    var inventory = new InventorySnapshot { DcsExecutable = exe, OptionsPath = options, VdxrRuntime = runtime };
+    var oldBias = ProfileValidation.ResolveFeatures(profile with { VdxrFocusHorizontalBias = 90, VdxrFocusVerticalBias = -90 });
+    Require(oldBias.VdxrFocusHorizontalBias == 45 && oldBias.VdxrFocusVerticalBias == -45, "Saved VDXR offsets adopt the new range");
+    var service = new ControlService(Path.Combine(root, "vdxr/distribution"), Path.Combine(root, "vdxr/state"));
+    var adapter = Path.Combine(root, "vdxr/dcsrender");
+    foreach (var file in new[] { "DcsRender.dll", "DcsRender.lua" }) Make("vdxr/dcsrender/" + file, "managed " + file);
+    var plan = new DeploymentPlanner(new(null, cheeky, layer, DcsRenderDirectory: adapter)).Build(profile, inventory, service.ManagedRoot);
+    var overlay = plan.Files.Single(f => Path.GetFileName(f.Path) == "CheekyOverlay.ini");
+    Require(IniFile.Parse(IniFile.Decode(overlay.Content))["Overlay.MenuKey"] == "120", "The VDXR shortcut writes Cheeky's virtual key");
+    Require(plan.LaunchEnvironment["XR_RUNTIME_JSON"] == runtime && plan.LaunchEnvironment["XR_ENABLE_API_LAYERS"] == "XR_APILAYER_CHEEKY_foveated_dlss", "VDXR loads the native quad/FG provider without OFXR or a second quad layer");
+    var hook = plan.Files.Single(f => Path.GetFileName(f.Path) == "DcsRender.lua");
+    Require(!plan.LaunchEnvironment.ContainsKey("DCS_NR_JOINT"), "Joint NR waits for a native Quad Views profile with NR enabled");
+    var joint = profile with { NeuralRendering = true };
+    Require(joint.UsesDcsJointNr && joint.UsesEngineModule &&
+        IniFile.Parse(ConfigurationWriters.DcsQvCull(joint))["Perception.FixationDepth"] == "1", "Joint NR enables the native render boundary");
+    var ordinaryNr = JsonData.Deserialize<VrProfile>(JsonData.Serialize(joint with { VdxrJointNr = false }));
+    Require(ordinaryNr.NeuralRendering && !ordinaryNr.UsesDcsJointNr && !ordinaryNr.UsesFixationDepth,
+        "Disabling Joint NR survives saving the profile and keeps ordinary NR enabled");
+    var visual = IniFile.Parse(ConfigurationWriters.DcsQvCull(ProfileValidation.ResolveFeatures(profile with
+    {
+        ColorMode = ColorMode.Enhanced, NightVision = true, Glare = true, GVision = true,
+        PanelGamut = 2, GVisionUseGaze = true, GazeDof = true, Gaze = GazeMode.EyeTracked
+    })));
+    Require(visual["Color.Mode"] == "2" && visual["ColorEnhanced.NightVision"] == "1" && visual["ColorEnhanced.Glare"] == "1"
+        && visual["VrFx.GVision"] == "1" && visual["VrFx.GVisionUseGaze"] == "0" && visual["VrFx.GazeDof"] == "0"
+        && !visual.ContainsKey("Color.PanelGamut"), "VDXR retains shared visual effects and uses centered G vision");
+    var ini = plan.Files.Single(f => f.Path.EndsWith("CheekyFoveatedDLSS.ini", StringComparison.OrdinalIgnoreCase));
+    var controls = IniFile.Parse(IniFile.Decode(ini.Content));
+    var focus = new Dictionary<string, string>
+    {
+        ["QuadFocusWidth"] = "32", ["QuadFocusHeight"] = "45", ["QuadCustomBlend"] = "1", ["QuadEdgeFeather"] = "8",
+        ["QuadCornerRadius"] = "12", ["QuadColorMatch"] = "1", ["QuadMatchStereoBorders"] = "1", ["QuadStereoDistanceM"] = "0.5",
+        ["QuadHeadOffset"] = "1", ["QuadFocusHorizontalBias"] = "-35.5", ["QuadFocusHorizontalAngleGain"] = "0.4",
+        ["QuadFocusHorizontalDeadzone"] = "2", ["QuadFocusVerticalBias"] = "35.5", ["QuadFocusVerticalAngleGain"] = "-0.2",
+        ["QuadFocusVerticalDeadzone"] = "3"
+    };
+    var stored = JsonData.Deserialize<VrProfile>(JsonData.Serialize(profile));
+    var restoredControls = IniFile.Parse(ConfigurationWriters.Cheeky(stored));
+    Require(focus.All(k => controls["CheekyFoveatedDLSS." + k.Key] == k.Value &&
+        restoredControls["CheekyFoveatedDLSS." + k.Key] == k.Value), "Native focus settings deploy and survive the profile round trip");
+    Require(controls["CheekyFoveatedDLSS.FgEnabled"] == "1" && controls["CheekyFoveatedDLSS.FgCenterMethod"] == "16"
+        && controls["CheekyFoveatedDLSS.QuadPrecompose"] == "1" && controls["CheekyFoveatedDLSS.NrEnabled"] == "0",
+        "VDXR defaults to whole-eye Optiflow Hybrid with NR off");
+    foreach (var (method, id) in new[] { (VdxrFrameGeneration.Optiflow, "7"), (VdxrFrameGeneration.OptiflowDepth, "11"), (VdxrFrameGeneration.OptiflowHybrid, "16") })
+    {
+        var settings = IniFile.Parse(ConfigurationWriters.Cheeky(profile with { VdxrFrameGenMethod = method }));
+        Require(settings["CheekyFoveatedDLSS.FgCenterMethod"] == id && !settings.ContainsKey("CheekyFoveatedDLSS.FgPeripheralMethod"),
+            "The whole-eye pass uses the selected center method");
+    }
+    foreach (var (guidance, splat, id) in new[] { (true, false, "17"), (false, true, "18"), (true, true, "19") })
+    {
+        var hybrid = profile with { VdxrFgDepthGuidance = guidance, VdxrFgDepthSplat = splat };
+        var settings = IniFile.Parse(ConfigurationWriters.Cheeky(JsonData.Deserialize<VrProfile>(JsonData.Serialize(hybrid))));
+        Require(settings["CheekyFoveatedDLSS.FgCenterMethod"] == id, "Hybrid depth settings round-trip and select the matching Cheeky method");
+    }
+    var quality = IniFile.Parse(ConfigurationWriters.Cheeky(joint with
+    {
+        VdxrCenterSr = true, VdxrCenterPreset = 11, VdxrCenterSupersampling = 1.2, VdxrNrPreset = 2,
+        VdxrAutomaticSr = true, VdxrSrThreshold = 75, VdxrAutomaticNr = true, VdxrNrThreshold = 85
+    }));
+    Require(quality["CheekyFoveatedDLSS.Enabled"] == "1" && quality["CheekyFoveatedDLSS.CenterPreset"] == "11"
+        && quality["CheekyFoveatedDLSS.CenterSupersampling"] == "1.2" && quality["CheekyFoveatedDLSS.PeripheralDlaa"] == "0"
+        && quality["CheekyFoveatedDLSS.QuadAutomaticSr"] == "1" && quality["CheekyFoveatedDLSS.QuadQualityTargetPercent"] == "75"
+        && quality["CheekyFoveatedDLSS.QuadAutomaticNr"] == "1" && quality["CheekyFoveatedDLSS.QuadNrTargetPercent"] == "85"
+        && quality["CheekyFoveatedDLSS.NrPreset"] == "2",
+        "VDXR applies center SR, the NR preset and independent adaptive thresholds");
+    foreach (var factor in new[] { 0, 2, 3, 4 })
+    {
+        var mapped = IniFile.Parse(ConfigurationWriters.Cheeky(profile with { FrameGenFactor = factor }));
+        Require(mapped["CheekyFoveatedDLSS.FgMultiplier"] == (factor == 0 ? "2" : factor.ToString()) && mapped["CheekyFoveatedDLSS.FgAutoMultiplier"] == (factor == 0 ? "1" : "0"), "Auto and supported fixed multipliers map to the backend");
+    }
+    using var manifest = System.Text.Json.JsonDocument.Parse(plan.Files.Single(f => Path.GetFileName(f.Path) == "cheeky.json").Content);
+    Require(manifest.RootElement.GetProperty("api_layer").GetProperty("instance_extensions")[0].GetProperty("name").GetString() == "XR_VARJO_quad_views", "the explicit layer retains its native quad extension");
+    service.Apply(plan);
+    Require(File.Exists(hook.Path), "VDXR installs the DCS rendering lifecycle hook");
+    var game = new LuaOptions(File.ReadAllText(options));
+    Require(game.Get("VR", "enable") == "true" && game.Get("VR", "openxr_quadView") == "true" && game.Get("graphics", "maxFPS") == "120",
+        "VDXR Match refresh writes the headset refresh rate as the native cap");
+    Require(FramePacing.Describe(profile) is { DcsCap: 120, RequiredRenderedFps: 30, ConfiguredOutputCeiling: 120 },
+        "VDXR reports the required frame rate separately from the native cap");
+    var log = Path.Combine(bin, "CheekyFoveatedDLSS-Loader.log"); File.WriteAllText(log, "runtime log");
+    Require(service.RestoreOriginals().Complete && File.ReadAllText(dxgi) == "the original loader" && File.ReadAllBytes(options).AsSpan().SequenceEqual(originalOptions), "restore returns the original loader and game settings");
+    Require(!File.Exists(Path.Combine(bin, "nvngx_dlssg.dll")) && !File.Exists(log) && !File.Exists(ini.Path) && !File.Exists(hook.Path), "restore removes the generated runtime, log, configuration and lifecycle hook");
+});
+Test("DesktopEnhanced keeps screen backend settings per profile and restores the original game files", () =>
+{
+    var distribution = Path.Combine(root, "desktop-enhanced/distribution");
+    var components = Path.Combine(distribution, "components/optiscaler-nr");
+    var dcsRender = Path.Combine(distribution, "components/dcsrender");
+    var exe = Make("desktop-enhanced/game/bin/DCS.exe", "fixture");
+    var bin = Path.GetDirectoryName(exe)!;
+    var options = Make("desktop-enhanced/sg/DCS/Config/options.lua", Lua.Replace("enable=false", "enable=true").Replace("\"DLSS\"", "\"TAA\"").Replace("graphics = {", "graphics = { width=2560, height=1440, aspect=1.7777777777778, sync=true,"));
+    var originalOptions = File.ReadAllBytes(options);
+    var adapterLua = Make("desktop-enhanced/sg/DCS/Scripts/Hooks/DcsRender.lua", "the original adapter hook");
+    var originalAdapterLua = File.ReadAllBytes(adapterLua);
+    var adapterDll = Path.Combine(Path.GetDirectoryName(adapterLua)!, "DcsRender.dll");
+    Make("desktop-enhanced/distribution/components/dcsrender/DcsRender.lua", "managed adapter hook");
+    Make("desktop-enhanced/distribution/components/dcsrender/DcsRender.dll", "managed adapter module");
+    foreach (var filename in new[] { "DcsRender.lua", "DcsRender.dll" })
+        File.WriteAllText(Path.Combine(dcsRender, filename + ".sha256"), Hashing.FileSha256(Path.Combine(dcsRender, filename)));
+    var dxgi = Make("desktop-enhanced/game/bin/dxgi.dll", "another program's loader");
+    var ini = Make("desktop-enhanced/game/bin/OptiScaler.ini", "[User]\nOriginal=true\n");
+    var autoexec = Make("desktop-enhanced/sg/DCS/Config/autoexec.cfg", "max_fps = 300\nHUD_MFD_after_DLSS = false\n");
+    var originalAutoexec = File.ReadAllText(autoexec);
+    var originalIni = File.ReadAllBytes(ini);
+    Make("desktop-enhanced/distribution/components/optiscaler-nr/dxgi.dll", "verified screen backend");
+    Make("desktop-enhanced/distribution/components/optiscaler-nr/OptiScaler.ini", "[Upscalers]\nDx11Upscaler=dlss_12\n[FrameGen]\nEnabled=false\n[DlssNr]\nHaloRadius=1.25\nRunBeforeSR=true\nPasses=1\nFinishedPicture=false\nDeferredDLSS=false\n");
+    Make("desktop-enhanced/distribution/components/optiscaler-nr/manifest.json", JsonData.Serialize(new
+    {
+        sourceCommit = "6125a75b37f7e2a408e31934f4827e5660429203",
+        runtimeSourceCommit = "6125a75b37f7e2a408e31934f4827e5660429203",
+        files = new[] { "dxgi.dll", "OptiScaler.ini" }.Select(path => new { path, sha256 = Hashing.FileSha256(Path.Combine(components, path)) }).ToArray()
+    }));
+    var service = new ControlService(distribution, Path.Combine(root, "desktop-enhanced/state"));
+    var inventory = new InventorySnapshot { DcsExecutable = exe, OptionsPath = options };
+    var plain = new VrProfile { Id = "desktop-plain", Name = "Optimizations only", Desktop = true };
+    var unchanged = service.Preview(plain, inventory);
+    Require(unchanged.Files.All(f => !f.Path.StartsWith(bin, StringComparison.OrdinalIgnoreCase) && f.Path != adapterLua && f.Path != adapterDll), "Optimizations only leaves the rendering backend and adapter alone");
+    var a = plain with
+    {
+        Id = "desktop-enhanced-a", Name = "Screen A", DesktopEnhanced = true, NeuralRendering = true, FrameGen = FrameGeneration.Nvidia, HudAfterDlss = true,
+        OptiScaler = new()
+        {
+            NeuralRendering = false, NeuralBeforeUpscaling = false, PeripheralCompression = true,
+            WorkingScale = 0.75,
+            CenterWidth = 70, CenterHeight = 100, PeripheralRetention = 50,
+            OverrideResolution = true, OutputWidth = 5120, OutputHeight = 1440,
+            RenderedFpsCap = 120, MatchDisplayRefresh = false, OutputFrameLimit = FpsLimitMode.Custom, VSync = false, DynamicFrameGeneration = true, FrameRateTarget = 120,
+            SuperResolution = false, Quality = "Balanced", FrameGeneration = true, FrameGenerationFactor = 3
+        }
+    };
+    var b = a with { Id = "desktop-enhanced-b", Name = "Screen B", HudAfterDlss = null, OptiScaler = new() { Quality = "Balanced", MatchDisplayRefresh = false } };
+    Require(a.ForLaunch() is { UsesOptiScaler: true, UsesCheeky: false, NeuralRendering: false, FrameGen: FrameGeneration.Off }, "screen enhancement does not reuse the VR backend settings");
+    Require(!(a with { Desktop = false }).UsesOptiScaler, "the retained screen switch is inactive on a VR route");
+    var runtime = Make("desktop-enhanced/runtime/runtime.json", "{\"runtime\":{\"library_path\":\"runtime.dll\"}}");
+    Make("desktop-enhanced/runtime/runtime.dll", "fixture");
+    var vr = a with { Desktop = false, NeuralRendering = false, FrameGen = FrameGeneration.Off, QuadViews = QuadProvider.None };
+    var vrPlan = new DeploymentPlanner(new(null, null, null, OptiScalerDirectory: components, DcsRenderDirectory: dcsRender)).Build(vr, inventory with { PimaxRuntime = runtime }, service.ManagedRoot);
+    Require(vrPlan.LaunchEnvironment["XR_RUNTIME_JSON"] == runtime && vrPlan.Files.All(f => f.Path != ini && f.Path != dxgi && f.Path != adapterLua && f.Path != adapterDll), "a VR route ignores the retained screen panel settings and scene adapter");
+    var first = service.Preview(a, inventory);
+    Require(first.LaunchEnvironment.Keys.All(k => !k.StartsWith("XR", StringComparison.OrdinalIgnoreCase) && !k.StartsWith("DISABLE_", StringComparison.OrdinalIgnoreCase)), "no XR runtime or layers");
+    Require(first.Files.All(f => !f.Path.Contains("Cheeky", StringComparison.OrdinalIgnoreCase) && !f.Path.Contains("ofxr", StringComparison.OrdinalIgnoreCase)), "only the screen backend is deployed");
+    Require(File.ReadAllBytes(options).AsSpan().SequenceEqual(originalOptions) && File.ReadAllBytes(ini).AsSpan().SequenceEqual(originalIni), "Preview leaves the game untouched");
+    var controls = IniFile.Parse(IniFile.Decode(first.Files.Single(f => f.Path == ini).Content));
+    Require(controls["DLSSG.ForceDMFG"] == "true" && controls["DLSSG.FramerateTargetDMFG"] == "0" && controls["Framerate.FramerateLimit"] == "120", "the output target controls the Opti limit while dynamic FG uses its automatic target");
+    var keepLimit = OptiScalerBackend.ConfigurationValues(a with { OptiScaler = a.OptiScaler with { OutputFrameLimit = FpsLimitMode.Preserve } });
+    var menuKeys = OptiScalerBackend.ConfigurationValues(a with { DesktopMenuKey = "121:3" });
+    Require(menuKeys["Menu.ShortcutKey"] == "121" && menuKeys["Menu.ShortcutKeyRequireCtrl"] == "true"
+        && menuKeys["Menu.ShortcutKeyRequireAlt"] == "true" && !keepLimit.ContainsKey("Menu.ShortcutKey"),
+        "Desktop Enhanced writes the recorded key and modifiers when the profile specifies them");
+    Require(!keepLimit.ContainsKey("Framerate.FramerateLimit"), "Keep leaves the saved Opti limit untouched");
+    Require(controls["V-Sync.OverrideVsync"] == "true" && controls["V-Sync.ForceVsync"] == "false", "VSync off is applied through the backend");
+    var autoTarget = OptiScalerBackend.ConfigurationValues(a with { OptiScaler = a.OptiScaler with { FrameRateTarget = 0, FrameGenerationFactor = 6, VSync = null } });
+    Require(autoTarget["DLSSG.FramerateTargetDMFG"] == "0" && autoTarget["DLSSG.InterpolationCount"] == "5" && autoTarget["V-Sync.ForceVsync"] == "auto" && autoTarget["V-Sync.OverrideVsync"] == "false", "automatic target, 6x multiplier and game VSync map to backend settings");
+    Require(controls["DlssNr.SpatialCenterX"] == "70" && controls["DlssNr.SpatialCenterY"] == "100" && controls["DlssNr.SpatialWorkX"] == "85" && controls["DlssNr.SpatialWorkY"] == "100", "peripheral retention preserves a full-height center and derives the horizontal working width");
+    Require(controls["DlssNr.WorkingScale"] == "0.75" && controls["DlssNr.RunBeforeSR"] == "false", "the panel applies working scale and NR processing position");
+    Require(controls["UpscaleRatio.UpscaleRatioOverrideValue"] == "1" && controls["FrameGen.Enabled"] == "true" && controls["DLSSG.InterpolationCount"] == "2", "SR off and 3x FG apply independently of VR's settings");
+    service.Apply(first);
+    var backendLogs = new[] { "OptiScaler.log", "OptiScaler_123.log" }.Select(name => Path.Combine(bin, name)).ToArray();
+    foreach (var log in backendLogs) File.WriteAllText(log, "runtime log");
+    var otherLog = Path.Combine(bin, "another-mod.log"); File.WriteAllText(otherLog, "keep");
+    Require(File.ReadAllText(adapterLua) == "managed adapter hook" && File.ReadAllText(adapterDll) == "managed adapter module", "Apply installs both managed scene adapter files");
+    Require(FramePacing.HudAfterDlss(File.ReadAllText(autoexec)) && File.ReadAllText(autoexec).StartsWith(originalAutoexec), "HUD draw order preserves existing autoexec commands");
+    Require(File.ReadAllText(dxgi) == "verified screen backend");
+    Require(File.ReadAllText(Path.Combine(bin, "dxgi-original.dll")) == "another program's loader", "Keep another program's dxgi working uses the screen backend's chain target");
+    var game = new LuaOptions(File.ReadAllText(options));
+    Require(game.Get("VR", "enable") == "false" && game.Get("graphics", "Upscaling") == "\"DLSS\"", "screen rendering selects the required game input without VR");
+    Require(game.Get("graphics", "width") == "5120" && game.Get("graphics", "height") == "1440" && Math.Abs(double.Parse(game.Get("graphics", "aspect")!, System.Globalization.CultureInfo.InvariantCulture) - 5120d / 1440) < 1e-12, "the selected output dimensions and aspect are applied together");
+    Require(game.Get("graphics", "maxFPS") == "120" && game.Get("graphics", "sync") == new LuaOptions(IniFile.Decode(originalOptions)).Get("graphics", "sync"), "the DCS limit is applied directly and backend VSync leaves the game's setting intact");
+    File.WriteAllText(ini, IniFile.SetValues(File.ReadAllText(ini), new Dictionary<string, string>
+    {
+        ["DlssNr.HaloRadius"] = "2.5", ["FrameGen.Enabled"] = "false", ["DlssNr.RunBeforeSR"] = "true",
+        ["DlssNr.Passes"] = "2", ["DlssNr.FinishedPicture"] = "true", ["DlssNr.DeferredDLSS"] = "true"
+    }));
+    var current = service.Preview(a, inventory).Files.Single(f => f.Path == ini);
+    var advanced = IniFile.Parse(IniFile.Decode(current.Content));
+    Require(advanced["DlssNr.RunBeforeSR"] == "false" && advanced["DlssNr.FinishedPicture"] == "false" && advanced["DlssNr.DeferredDLSS"] == "false", "the panel applies its selected NR position when preparing the next launch");
+    Require(advanced["DlssNr.HaloRadius"] == "2.5" && advanced["DlssNr.Passes"] == "2" && advanced["FrameGen.Enabled"] == "true", "menu parameters persist while panel controls override temporary edits");
+    service.Apply(service.Preview(b, inventory));
+    Require(File.ReadAllText(autoexec) == originalAutoexec, "switching to an untouched HUD setting restores the original autoexec");
+    var bLaunch = JsonData.Deserialize<LaunchConfiguration>(File.ReadAllText(Path.Combine(service.ManagedRoot, "profiles", b.Id, "launch.json")));
+    Require(bLaunch.Dependencies![autoexec] == Hashing.FileSha256(autoexec), "the launch contract follows the restored autoexec hash");
+    Require(IniFile.Parse(File.ReadAllText(ini))["DlssNr.HaloRadius"] == "1.25" && IniFile.Parse(File.ReadAllText(ini))["FrameGen.Enabled"] == "false" && IniFile.Parse(File.ReadAllText(ini))["UpscaleRatio.UpscaleRatioOverrideValue"] == "1.7", "a new profile starts from its own menu defaults and Balanced SR panel selection");
+    game = new LuaOptions(File.ReadAllText(options));
+    Require(game.Get("graphics", "width") == "2560" && game.Get("graphics", "height") == "1440" && Math.Abs(double.Parse(game.Get("graphics", "aspect")!, System.Globalization.CultureInfo.InvariantCulture) - 2560d / 1440) < 1e-12, "following DCS releases the previous profile's output override");
+    Require(game.Get("graphics", "maxFPS") == "89" && game.Get("graphics", "sync") == "true", "following DCS restores its recorded frame cap and VSync");
+    var savedA = Path.Combine(service.ManagedRoot, "profiles", a.Id, "OptiScaler.ini");
+    Require(IniFile.Parse(File.ReadAllText(savedA))["DlssNr.HaloRadius"] == "2.5", "the previous profile's advanced menu changes are saved before switching");
+    service.Apply(service.Preview(a, inventory));
+    Require(IniFile.Parse(File.ReadAllText(ini))["DlssNr.HaloRadius"] == "2.5" && IniFile.Parse(File.ReadAllText(ini))["FrameGen.Enabled"] == "true", "switching back combines that profile's advanced parameters and panel controls");
+    Require(IniFile.Parse(File.ReadAllText(ini))["DlssNr.RunBeforeSR"] == "false" && IniFile.Parse(File.ReadAllText(ini))["DlssNr.Passes"] == "2", "switching back combines the panel's NR position with saved model passes");
+    game = new LuaOptions(File.ReadAllText(options));
+    File.WriteAllText(ini, IniFile.SetValues(File.ReadAllText(ini), new Dictionary<string, string> { ["DlssNr.HaloRadius"] = "3.5" }));
+    Require(service.RestoreOriginals().Complete);
+    Require(File.ReadAllText(autoexec) == originalAutoexec, "Back to stock restores the original autoexec file");
+    Require(File.ReadAllText(dxgi) == "another program's loader" && File.ReadAllBytes(ini).AsSpan().SequenceEqual(originalIni) && File.ReadAllBytes(options).AsSpan().SequenceEqual(originalOptions), "Back to stock restores the original loader, INI and game settings exactly");
+    Require(!File.Exists(Path.Combine(bin, "dxgi-original.dll")), "the chain copy is removed on restore");
+    Require(backendLogs.All(log => !File.Exists(log)) && File.Exists(otherLog), "restore removes declared backend logs and keeps unrelated logs");
+    Require(File.ReadAllBytes(adapterLua).AsSpan().SequenceEqual(originalAdapterLua) && !File.Exists(adapterDll), "Back to stock restores the existing hook and removes the module created by the profile");
+    Require(IniFile.Parse(File.ReadAllText(savedA))["DlssNr.HaloRadius"] == "3.5", "restore also saves the latest advanced menu settings");
+    service.Apply(service.Preview(a, inventory));
+    Require(IniFile.Parse(File.ReadAllText(ini))["DlssNr.HaloRadius"] == "3.5", "advanced settings survive Back to stock and a later apply");
+    service.Apply(service.Preview(plain, inventory));
+    Require(File.ReadAllBytes(adapterLua).AsSpan().SequenceEqual(originalAdapterLua) && !File.Exists(adapterDll), "switching to Optimizations only restores the existing hook and removes the managed module");
+    Require(service.RestoreOriginals().Complete);
+    File.Copy(Path.Combine(dcsRender, "DcsRender.lua"), adapterLua, true);
+    File.Copy(Path.Combine(dcsRender, "DcsRender.dll"), adapterDll, true);
+    Require(service.LeftoverFiles(exe, options).Count(f => f.Path == adapterLua || f.Path == adapterDll) == 2, "manually deployed adapter copies are recognized without an installation record");
+    Require(service.RestoreOriginals(exe, options).Complete && !File.Exists(adapterLua) && !File.Exists(adapterDll), "Back to stock removes the unrecorded adapter copies");
 });
 Test("Profile launches skip the DCS launcher, whose restart loses the profile process", () =>
 {
@@ -1306,7 +1540,7 @@ Test("The prefetch fix is an engine optimization: nothing in DCS's bin without D
         File.WriteAllText(oldLog, "2026-10-10 20:00:00 calls/s=1000 skipped=99.0% pointers=1 imports=40 lookups=0 faults=0");
         Require(File.ReadAllText(dxgi) == "focus loader" && File.Exists(dxgi2));
         // 0.5.5: CPU Boost with Engine Optimizations and the fix on Skip writes nothing in bin and no prefetch variable.
-        var profile = new VrProfile { QuadViews = QuadProvider.None, CpuBoost = true, EngineOptimizations = true, BoostPrefetch = PrefetchFix.Skip, Desktop = desktop };
+        var profile = new VrProfile { QuadViews = QuadProvider.None, CpuBoost = true, EngineOptimizations = true, BoostPrefetch = PrefetchFix.Skip, Desktop = desktop, EngineReleaseIdleDlss = false };
         var planner = new DeploymentPlanner(new(null, null, null, EngineDirectory: components));
         var plan = planner.Build(profile, inventory, Path.Combine(root, dir + "/managed"));
         Require(plan.Files.All(f => !f.Path.StartsWith(bin + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase)), "Nothing in DCS's bin: " + string.Join(", ", plan.Files.Select(f => f.Path)));
@@ -1355,6 +1589,42 @@ Test("Pupil shift is deployed first in the layer chain with its ini, only for ey
     Require(ProfileValidation.Validate(on with { EngineOptimizations = true, PupilShiftToggleKey = NeuralHotkeys.EngineDefault }).Any(i => i.Code == "hotkey-conflict"));
     Require(ProfileValidation.Validate(on with { EngineOptimizations = true, PupilShiftToggleKey = "120:3" }).Any(i => i.Code == "pupil-hotkey"));
     Require(!ProfileValidation.Validate(on with { PupilShift = false, EngineOptimizations = true, PupilShiftToggleKey = NeuralHotkeys.EngineDefault }).Any(i => i.Code == "hotkey-conflict"));
+});
+Test("Desktop FG hardware follows GPU series, driver thresholds and multi-GPU uncertainty", () =>
+{
+    var previous = GpuInfo.Adapters;
+    var cases = new (GpuAdapter[] Adapters, bool? Supported, int? Max, bool? Dynamic)[]
+    {
+        ([], null, null, null),
+        ([new("AMD Radeon RX 7900 XTX", "AMD", "31.0")], false, 1, false),
+        ([new("NVIDIA GeForce RTX 2080 Ti", "NVIDIA", "617.42")], false, 1, false),
+        ([new("NVIDIA GeForce RTX 3080", "NVIDIA", "617.42")], false, 1, false),
+        ([new("NVIDIA GeForce RTX 4090", "NVIDIA", "617.42")], true, 2, false),
+        ([new("NVIDIA GeForce RTX 5080", "NVIDIA", "595.40")], true, 4, false),
+        ([new("NVIDIA GeForce RTX 5080", "NVIDIA", "595.41")], true, 4, true),
+        ([new("NVIDIA GeForce RTX 5080", "NVIDIA", "595.96")], true, 4, true),
+        ([new("NVIDIA GeForce RTX 5080", "NVIDIA", "595.97")], true, 6, true),
+        ([new("NVIDIA GeForce RTX 5080", "NVIDIA", "32.0.16.1742")], true, 6, true),
+        ([new("NVIDIA GeForce RTX 5080 Laptop GPU", "NVIDIA", null)], true, 4, null),
+        ([new("NVIDIA GeForce RTX 5080", "NVIDIA", "unknown")], true, 4, null),
+        ([new("NVIDIA RTX A4000", "NVIDIA", "617.42")], null, null, null),
+        ([new("NVIDIA GeForce RTX 4090", "NVIDIA", "617.42"), new("NVIDIA GeForce RTX 5080", "NVIDIA", "617.42")], null, null, null),
+        ([new("Intel UHD Graphics", "Intel", "31.0"), new("NVIDIA GeForce RTX 5080", "NVIDIA", "617.42")], true, 6, true)
+    };
+    try
+    {
+        foreach (var item in cases)
+        {
+            GpuInfo.Adapters = () => item.Adapters;
+            var capability = GpuInfo.DesktopFrameGeneration;
+            Require(capability.Supported == item.Supported && capability.MaxMultiplier == item.Max && capability.DynamicSupported == item.Dynamic,
+                string.Join(", ", item.Adapters.Select(a => a.Name + " / " + a.Driver)));
+            Require(capability.Note.Length > 0);
+            if (capability.Supported == true && capability.MaxMultiplier == 4)
+                Require(capability.MultiplierRequirement?.Contains("595.97", StringComparison.Ordinal) == true);
+        }
+    }
+    finally { GpuInfo.Adapters = previous; }
 });
 Test("Other environments: AMD/Intel graphics, OpenBeta Saved Games, 3× at 72 Hz, small CPUs, short profile names", () =>
 {
@@ -1800,6 +2070,12 @@ Test("Free unused DLSS memory: on by default, [DLSS] ReleaseIdleSets=1 only with
     const string block = "\n; Free unused DLSS memory: DCS sets up DLSS twice per mission load and never frees the first set; it is released\n; once DCS evaluates only the newest one. The image does not change.\nReleaseIdleSets=1";
     var engine = new VrProfile { EngineOptimizations = true, EngineReleaseIdleDlss = false };
     var qv = new VrProfile { QuadViews = QuadProvider.QuadViewsFoveated, Gaze = GazeMode.EyeTracked, EngineOptimizations = true, EngineReleaseIdleDlss = false };
+    var enabled = engine with { EngineReleaseIdleDlss = true };
+    Require(enabled.UsesRenderingLifecycle && !enabled.UsesBackendRenderingLifecycle, "Native DLSS reclamation installs DcsRender");
+    foreach (var backend in new[] { enabled with { Desktop = true, DesktopEnhanced = true },
+        enabled with { Runtime = RuntimeKind.Vdxr, QuadViews = QuadProvider.CheekyNative } })
+        Require(backend.UsesRenderingLifecycle && backend.UsesBackendRenderingLifecycle && !Module(backend).Contains("ReleaseIdleSets"),
+            "A managed backend uses only its own release provider");
     // On: [DLSS] ReleaseIdleSets=1 after [Perception], on a monitor and in VR; with it removed, the file as before.
     foreach (var p in new[] { engine, engine with { Desktop = true }, qv, qv with { EngineDevMode = true } })
     {
@@ -2042,7 +2318,7 @@ Test("DCS engine optimizations install in Saved Games Scripts with the profile's
     var scripts = Path.GetFullPath(Path.Combine(root, "engine/sg/DCS/Scripts")); var module = Path.Combine(scripts, "DcsQvCull");
     var off = new VrProfile { QuadViews = QuadProvider.None };
     Require(planner.Build(off, inventory, Path.Combine(root, "engine/managed-off")).Files.All(f => !f.Path.StartsWith(scripts, StringComparison.OrdinalIgnoreCase)));
-    var on = off with { EngineOptimizations = true };
+    var on = off with { EngineOptimizations = true, EngineReleaseIdleDlss = false };
     var plan = planner.Build(on, inventory, Path.Combine(root, "engine/managed"));
     var engineFiles = plan.Files.Where(f => f.Path.StartsWith(scripts, StringComparison.OrdinalIgnoreCase)).Select(f => Path.GetRelativePath(scripts, f.Path)).ToArray();
     // The hook is written last, so restore removes it first; nothing goes to the DCS install.
@@ -2146,7 +2422,7 @@ Test("Engine shader cache: kept in the state folder across Back to stock DCS, ad
     var planner = new DeploymentPlanner(new(null, null, null, EngineDirectory: components));
     var state = Path.GetFullPath(Path.Combine(root, "shader-cache/state")); var cache = EngineShaderCache.DirectoryIn(state, options)!;
     var module = Path.GetFullPath(Path.Combine(root, "shader-cache/sg/DCS/Scripts/DcsQvCull"));
-    var on = new VrProfile { QuadViews = QuadProvider.None, EngineOptimizations = true };
+    var on = new VrProfile { QuadViews = QuadProvider.None, EngineOptimizations = true, EngineReleaseIdleDlss = false };
     string Ini(ApplyPlan plan) => new StreamReader(new MemoryStream(plan.Files.Single(f => f.Path.EndsWith("DcsQvCull.ini")).Content), Encoding.UTF8, true).ReadToEnd().ReplaceLineEndings("\n");
 
     // One folder per Saved Games variant: DCS stable and Open Beta would otherwise recompile and overwrite each other's
@@ -2232,7 +2508,7 @@ Test("Engine shader cache: kept in the state folder across Back to stock DCS, ad
 });
 Test("Recorders on emulated command lists: [Model] RecordersEmulatedLists only when on, not live, shown only where it can matter", () =>
 {
-    var on = new VrProfile { QuadViews = QuadProvider.None, EngineOptimizations = true };
+    var on = new VrProfile { QuadViews = QuadProvider.None, EngineOptimizations = true, EngineReleaseIdleDlss = false };
     Require(!on.EngineRecordersEmulatedLists && !JsonData.Deserialize<VrProfile>("{\"engineOptimizations\":true}")!.EngineRecordersEmulatedLists, "off by default, also for an older profile");
     Require(JsonData.Deserialize<VrProfile>("{\"engineOptimizations\":true,\"engineRecordersEmulatedLists\":true}")!.UsesRecordersEmulatedLists, "loads from profile.json");
     Require(!IniFile.Parse(ConfigurationWriters.DcsQvCull(on)).ContainsKey("Model.RecordersEmulatedLists") && !ConfigurationWriters.DcsQvCull(on).Contains("RecordersEmulatedLists", StringComparison.Ordinal), "off: the key is not written");
@@ -2268,7 +2544,7 @@ Test("Recorders on emulated command lists: [Model] RecordersEmulatedLists only w
 });
 Test("Engine shader warm-up: settings in DcsQvCull.ini and warmup.json for the Engine page", () =>
 {
-    var on = new VrProfile { QuadViews = QuadProvider.None, EngineOptimizations = true };
+    var on = new VrProfile { QuadViews = QuadProvider.None, EngineOptimizations = true, EngineReleaseIdleDlss = false };
     var defaults = IniFile.Parse(ConfigurationWriters.DcsQvCull(on));
     Require(on.EngineShaderCachePrewarm && on.EngineShaderCompileWorkers == 0 && !defaults.ContainsKey("Model.ShaderCachePrewarm") && !defaults.ContainsKey("Model.ShaderCompileWorkers"),
         "Defaults (menu prep on, Auto threads) leave the keys out: the module's own defaults");
@@ -2305,7 +2581,7 @@ Test("Engine shader cache: applying through ControlService adopts the module fol
     Make("shader-cache-service/components/dcsqvcull/DcsQvCullPayload.dll", "payload"); Make("shader-cache-service/components/dcsqvcull/DcsQvCull.lua", "-- hook");
     var inventory = new InventorySnapshot { DcsExecutable = exe, OptionsPath = options, PimaxRuntime = runtime };
     var state = Path.GetFullPath(Path.Combine(root, "shader-cache-service/state")); var service = new ControlService(root, state);
-    var on = new VrProfile { QuadViews = QuadProvider.None, EngineOptimizations = true };
+    var on = new VrProfile { QuadViews = QuadProvider.None, EngineOptimizations = true, EngineReleaseIdleDlss = false };
     var planner = new DeploymentPlanner(new(null, null, null, EngineDirectory: components));
     var legacy = Make("shader-cache-service/sg/DCS/Scripts/DcsQvCull/cache/s_00000000000000aa.qvc", "entry");
     var cache = service.ShaderCacheDirectoryFor(options)!;
@@ -3925,8 +4201,9 @@ Test("Saved runtime: Detect saves a found runtime and uses the copy for a profil
     var store = new NeuralRuntimeStore(Path.Combine(root, "saved-runtime/detect/state/runtimes"));
     var sources = new DetectionSources { SteamVrServerLog = Path.Combine(root, "missing.txt"), PimaxPlaySettings = Path.Combine(root, "missing.json"), NeuralRuntimeFolders = [Path.GetDirectoryName(folder)!], ProcessRunning = _ => false, SavedRuntimes = store };
     var first = SetupDetection.Detect(stereoNeural, new(), sources);
-    Require(store.Current() is { } copy && copy.OriginalPath == found && first.Profile.NeuralRuntimePath is null, "Found file saved, profile uses the copy");
-    Require(first.Detected.Single(d => d.Field == "neuralRuntimePath").Value.StartsWith("Saved copy · version 310.8"));
+    Require(store.Current() is { } copy && copy.OriginalPath == found && first.Profile.NeuralRuntimePath is null
+        && first.Detected.Single(d => d.Field == "neuralRuntimePath").Value == "Saved copy · version " + copy.Version,
+        "Found file saved, profile uses the copy and Detect reports its version");
     File.Delete(found);
     var moved = SetupDetection.Detect(stereoNeural with { NeuralRuntimePath = found }, new(), sources with { NeuralRuntimeFolders = [] });
     Require(moved.Profile.NeuralRuntimePath is null && moved.Detected.Any(d => d.Field == "neuralRuntimePath"), "A profile whose file is gone switches to the copy");
@@ -4602,6 +4879,7 @@ E2eFixture E2e(string name)
     }
     Component("CheekyOpenXRLayer.dll", "MZ cheeky layer (fixture)"); Component("ofxr/XR_APILAYER_XRFrameBridge_diagnostic.dll", "MZ ofxr fork (fixture)");
     Component("dcsqvcull/DcsQvCull.dll", "MZ engine loader (fixture)"); Component("dcsqvcull/DcsQvCullPayload.dll", "MZ engine payload (fixture)"); Component("dcsqvcull/DcsQvCull.lua", "-- engine hook (fixture)");
+    Component("dcsrender/DcsRender.dll", "MZ rendering adapter (fixture)"); Component("dcsrender/DcsRender.lua", "-- rendering adapter hook (fixture)");
     Component("pupilshift/XR_APILAYER_DCSVR_pupil_shift.dll", "MZ pupil shift (fixture)");
     var quad = Path.Combine(dist, "components/quadviews"); Directory.CreateDirectory(quad);
     foreach (var file in new[] { "XR_APILAYER_MBUCCHIA_quad_views_foveated.dll", "openxr-api-layer.json", "settings.cfg" })
@@ -4921,6 +5199,7 @@ Test("UI rules match C#: app.js's <uses-rules> give VrProfile.Uses* and ResolveF
         new() { Desktop = true, ColorMode = ColorMode.Enhanced, GVision = true, ColorModeKey = "120:6" }, eye with { GVision = true, GVisionUseGaze = true },
         eye with { GVision = true, GVisionUseGaze = false }, eye with { GazeDof = true }, new() { GazeDof = true }, eye with { QuadViewsLayerDirectory = "   " },
         eye with { QuadViewsLayerDirectory = @"C:\qv" }, eye with { Desktop = true, DepthBoost = true, GazeDof = true },
+        new() { Runtime = RuntimeKind.Vdxr, QuadViews = QuadProvider.CheekyNative, FrameGen = FrameGeneration.Nvidia, FrameGenFactor = 4 },
         new() { FrameGen = FrameGeneration.Nvidia }, new() { FrameGen = FrameGeneration.FidelityFx, FrameGenFactor = 3 }, new() { FrameGen = FrameGeneration.Nvidia, FrameGenFactor = 2 },
         new() { FrameGen = FrameGeneration.Nvidia, FrameGenAdaptiveCadence = false }, new() { FrameGen = FrameGeneration.Nvidia, Desktop = true }, new() { FrameGenAdaptiveCadence = true },
         eye with { PeripheryDlssPreset = PeripheryDlssPreset.E, EngineOptimizations = true }, new() { QuadViews = QuadProvider.QuadViewsFoveated, PeripheryDlssPreset = PeripheryDlssPreset.K, EngineOptimizations = true },
@@ -4969,7 +5248,7 @@ Test("UI rules match C#: app.js's <uses-rules> give VrProfile.Uses* and ResolveF
         {
             ["eyeTrackedVr"] = p.UsesEyeTrackedVr, ["usesPupilShift"] = p.UsesPupilShift, ["usesDepthBoost"] = p.UsesDepthBoost, ["usesPerceptionLayer"] = p.UsesPerceptionLayer,
             ["usesColorKey"] = p.UsesColorModeKey, ["colorOn"] = p.UsesColorMode, ["usesGazeDof"] = p.UsesGazeDof, ["gVisionOn"] = p.UsesGVision, ["usesVisualRealism"] = p.UsesVisualRealism,
-            ["usesGazePublish"] = p.UsesGazePublish, ["usesPeripheryDlssPreset"] = p.UsesPeripheryDlssPreset, ["foveatedSr"] = p.UsesFoveatedDlss, ["dlss"] = p.UsesCheeky, ["stereoCheeky"] = p.UsesCheeky && p.QuadViews == QuadProvider.None,
+            ["usesGazePublish"] = p.UsesGazePublish, ["usesPeripheryDlssPreset"] = p.UsesPeripheryDlssPreset, ["foveatedSr"] = p.UsesFoveatedDlss, ["dlss"] = p.NeuralRendering || p.UsesFoveatedDlss, ["stereoCheeky"] = (p.NeuralRendering || p.UsesFoveatedDlss) && p.QuadViews == QuadProvider.None,
             ["quad"] = p.UsesBundledQuadViews, ["nativeAllowed"] = ProfileValidation.ResolveFeatures(p with { QuadViews = QuadProvider.PimaxNative }).QuadViews == QuadProvider.PimaxNative,
             ["depthMax"] = p.DepthBoostActiveMax, ["usesAdaptiveCadence"] = p.UsesAdaptiveCadence, ["capDivider"] = (double)FramePacing.CapDivider(p), ["resolvedFoveatedDlss"] = resolved.FoveatedDlss, ["resolvedQuadViews"] = resolved.QuadViews.ToString(), ["resolvedQuadFocusAdapter"] = resolved.QuadFocusAdapter,
         };
@@ -5378,7 +5657,11 @@ Test("Live phase 2: Cheeky's DLSS 5 tuning is written live into its own INI, its
     Require(f.Service.SyncApplied(edited, inventory).Kind == LaunchSyncKind.Unchanged, "Cheeky's own save is not an edit");
     Require(f.Service.RestoreOriginals().Complete && f.Service.Originals.Status() is { Count: 0, State: "clean" });
 });
-foreach (var (name, action) in tests)
+// Optional second argument: a case-insensitive part of the test name. No argument keeps the complete run.
+var filter = args.ElementAtOrDefault(1);
+var selected = filter is null ? tests : tests.Where(t => t.Name.Contains(filter, StringComparison.OrdinalIgnoreCase)).ToList();
+if (selected.Count == 0) { Console.Error.WriteLine("No tests match: " + filter); return 2; }
+foreach (var (name, action) in selected)
 {
     currentTest = name; var skips = skipped.Count;
     try { action(); Console.WriteLine((skipped.Count > skips ? "SKIPPED " : "PASS ") + name); }
@@ -5387,7 +5670,7 @@ foreach (var (name, action) in tests)
 // Skipped tests count as passed (as before) and are listed here, each with why, so a skip is never silent.
 Console.WriteLine($"{skipped.Count} test(s) skipped" + (skipped.Count == 0 ? "." : ":"));
 foreach (var (test, reason) in skipped) Console.WriteLine("  SKIP " + test + ": " + reason);
-var report = new { total = tests.Count, passed = tests.Count - failed.Count, failed, durationSeconds = timer.Elapsed.TotalSeconds, fixtureDirectory = root, skipped = skipped.Select(s => new { test = s.Test, reason = s.Reason }).ToArray() };
+var report = new { total = selected.Count, passed = selected.Count - failed.Count, failed, durationSeconds = timer.Elapsed.TotalSeconds, fixtureDirectory = root, skipped = skipped.Select(s => new { test = s.Test, reason = s.Reason }).ToArray() };
 Console.WriteLine(JsonData.Serialize(report));
 // A fully passing run leaves nothing behind (each run used to add a fixture folder); a failing one keeps it to look at.
 if (failed.Count == 0) try { Directory.Delete(root, true); } catch (Exception e) when (e is IOException or UnauthorizedAccessException) { }

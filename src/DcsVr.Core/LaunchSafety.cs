@@ -142,9 +142,9 @@ public static class LaunchSafety
         if (inventory.OptionsPath is { } options && Path.GetDirectoryName(options) is { } config)
         {
             folders.Add(config);
-            if (profile.UsesEngineModule && Path.GetDirectoryName(config) is { } savedGames) folders.Add(Path.Combine(savedGames, "Scripts"));
+            if ((profile.UsesEngineModule || profile.UsesOptiScaler) && Path.GetDirectoryName(config) is { } savedGames) folders.Add(Path.Combine(savedGames, "Scripts"));
         }
-        if (profile.ForLaunch().UsesCheeky && inventory.DcsExecutable is { } exe && Path.GetDirectoryName(exe) is { } bin) folders.Add(bin);
+        if (profile.ForLaunch() is var launch && (launch.UsesCheeky || launch.UsesOptiScaler) && inventory.DcsExecutable is { } exe && Path.GetDirectoryName(exe) is { } bin) folders.Add(bin);
         return folders;
     }
 

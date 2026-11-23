@@ -3,22 +3,42 @@ const $ = id => document.getElementById(id);
 const pages = [
   ['overview','Overview','What runs when you press Launch DCS, and how your last flight went.','Status at a glance','M3.5 16.5a8.5 8.5 0 1 1 17 0 M12 16.5l4.2-5.8 M6.3 11.4l1.1.7 M12 8.2v1.3 M17.7 11.4l-1.1.7 M13.3 16.5a1.3 1.3 0 1 1-2.6 0 1.3 1.3 0 0 1 2.6 0Z M5 20h14'],
   ['presets','Presets','Named copies of all your settings. Save a setup, switch to another in one click.','Your saved setups','M6 3.5h12a1 1 0 0 1 1 1V21l-7-4.2L5 21V4.5a1 1 0 0 1 1-1Z'],
-  ['guide','Feature guide','What each feature does, what to expect from it and what it costs, at a glance.','What to expect','M5 4h10l4 4v12H5Z M15 4v4h4 M8 12h8 M8 15.5h8 M8 9h4'],
+  ['guide','Feature Guide','What each feature does, what to expect from it and what it costs, at a glance.','What to expect','M5 4h10l4 4v12H5Z M15 4v4h4 M8 12h8 M8 15.5h8 M8 9h4'],
   ['engine','Engine Optimizations','Makes DCS itself lighter on the CPU, on a monitor or in VR: more FPS, the same image.','CPU work inside DCS','M12 8.8a3.2 3.2 0 1 0 0 6.4 3.2 3.2 0 0 0 0-6.4Z M12 3v2.6 M12 18.4V21 M3 12h2.6 M18.4 12H21 M5.6 5.6l1.9 1.9 M16.5 16.5l1.9 1.9 M5.6 18.4l1.9-1.9 M16.5 7.5l1.9-1.9','Engine'],
   ['boost','CPU Boost','Gives DCS priority and the best CPU cores, and frees video memory and desktop resources while you fly.','CPU, VRAM & monitor','M6 6h12v12H6Z M9 3v3M15 3v3M9 18v3M15 18v3M3 9h3M3 15h3M18 9h3M18 15h3 M12.8 8.5 10.2 12.3h3.6l-2.6 3.7'],
   ['foveation','Quad Views','Full detail where you look, lower resolution around it: less work for the GPU. Periphery stability calms the periphery.','Foveated rendering','M3 8V5a2 2 0 0 1 2-2h3 M16 3h3a2 2 0 0 1 2 2v3 M21 16v3a2 2 0 0 1-2 2h-3 M8 21H5a2 2 0 0 1-2-2v-3 M6 12c1.6-2.7 3.6-4 6-4s4.4 1.3 6 4c-1.6 2.7-3.6 4-6 4s-4.4-1.3-6-4Z M14 12a2 2 0 1 1-4 0 2 2 0 0 1 4 0Z'],
   ['dlss','DLSS','DLSS 5, the DLSS models DCS upscales with, and Foveated Super Resolution.','Neural rendering','M10 3c.6 3.8 2.2 5.4 6 6-3.8.6-5.4 2.2-6 6-.6-3.8-2.2-5.4-6-6 3.8-.6 5.4-2.2 6-6Z M18 14c.3 1.8 1.1 2.6 3 3-1.9.4-2.7 1.2-3 3-.3-1.8-1.1-2.6-3-3 1.9-.4 2.7-1.2 3-3Z'],
-  ['framegen','Frame generation','Generated frames between the ones DCS renders, and the DCS frame limit that goes with them.','Generation & limit','M3 10h11v10H3Z M6.5 10V6.5h11v10H14 M10 6.5V3h11v10h-3.5'],
+  ['sr','Super Resolution','Center upscaling and adaptive quality for Quad Views.','Center detail','M4 9V4h5 M15 4h5v5 M20 15v5h-5 M9 20H4v-5 M9 9h6v6H9Z'],
+  ['framegen','Frame Generation','Generated frames between the ones DCS renders, and the DCS frame limit that goes with them.','Generation & limit','M3 10h11v10H3Z M6.5 10V6.5h11v10H14 M10 6.5V3h11v10h-3.5'],
   ['pupil','Perception','Eye distance, Pupil shift, Depth boost and Far depth.','Eyes & depth','M2.5 12c2.2-3.7 5.4-5.5 9.5-5.5s7.3 1.8 9.5 5.5c-2.2 3.7-5.4 5.5-9.5 5.5S4.7 15.7 2.5 12Z M14.5 12a2.5 2.5 0 1 1-5 0 2.5 2.5 0 0 1 5 0Z M17 3.5l2.5 2.5L17 8.5 M19.5 6h-5'],
-  ['visual','Visual realism','How the image looks in the headset: color, night vision, glare, eye-focus blur and G vision. Off by default.','Color, night & G','M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18Z M12 3v18 M12 7h5 M12 11h7 M12 15h6'],
-  ['setup','DCS & headset','Where DCS is installed, the DCS launcher and, in VR, the headset software.','Paths & launcher','M3 9a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v6a2 2 0 0 1-2 2h-4.2l-1.8-2.4h-2L9.2 17H5a2 2 0 0 1-2-2Z M9.5 12a1.5 1.5 0 1 1-3 0 1.5 1.5 0 0 1 3 0Z M17.5 12a1.5 1.5 0 1 1-3 0 1.5 1.5 0 0 1 3 0Z'],
-  ['osd','Keys & headset panel','Every in-flight key, and the status panel in the headset.','Keys & headset panel','M3 5h18v11H3Z M8 20h8 M12 16v4 M6 8.5h6 M6 11.5h9'],
+  ['visual','Visual Realism','How the image looks in the headset: color, night vision, glare, eye-focus blur and G vision. Off by default.','Color, night & G','M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18Z M12 3v18 M12 7h5 M12 11h7 M12 15h6'],
+  ['setup','DCS & Headset','Where DCS is installed, the DCS launcher and, in VR, the headset software.','Paths & launcher','M3 9a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v6a2 2 0 0 1-2 2h-4.2l-1.8-2.4h-2L9.2 17H5a2 2 0 0 1-2-2Z M9.5 12a1.5 1.5 0 1 1-3 0 1.5 1.5 0 0 1 3 0Z M17.5 12a1.5 1.5 0 1 1-3 0 1.5 1.5 0 0 1 3 0Z'],
+  ['osd','In Flight','Every in-flight key, and the status panel in the headset.','Keys & headset panel','M3 5h18v11H3Z M8 20h8 M12 16v4 M6 8.5h6 M6 11.5h9'],
   ['diagnostics','Checks','What to fix before launching, what to check yourself, and the files Launch DCS writes.','Checks & files','M9 3.5h6v3H9Z M9 5H6.5A1.5 1.5 0 0 0 5 6.5v13A1.5 1.5 0 0 0 6.5 21h11a1.5 1.5 0 0 0 1.5-1.5v-13A1.5 1.5 0 0 0 17.5 5H15 M8.5 13.5l2.5 2.5 4.5-5'],
-  ['support','Help & support','When something does not work: what the headset panel messages mean, a package for your report, and app updates.','Problems, reports, updates','M12 3.5a8.5 8.5 0 1 0 0 17 8.5 8.5 0 0 0 0-17Z M9.6 9.4a2.5 2.5 0 1 1 3.4 2.3c-.6.3-1 .8-1 1.5v.6 M12 16.4v.2'],
+  ['support','Help & Support','When something does not work: what the headset panel messages mean, a package for your report, and app updates.','Problems, reports, updates','M12 3.5a8.5 8.5 0 1 0 0 17 8.5 8.5 0 0 0 0-17Z M9.6 9.4a2.5 2.5 0 1 1 3.4 2.3c-.6.3-1 .8-1 1.5v.6 M12 16.4v.2'],
   ['recovery','Stock DCS','Undo everything DCS Control changed in DCS, in one step.','Undo every change','M4.5 12a7.5 7.5 0 1 0 2.2-5.3L4.5 9 M4.5 4.5V9H9 M12 8.5v3.5l2.5 1.8']
 ];
-/** Pages of the VR features, hidden in Optimizations only (no VR). */
+/** Pages of the VR features, hidden on both non-VR routes. */
 const VR_PAGES = ['foveation','dlss','framegen','pupil','visual'];
+const hasBackendMenu = p => vdxrVr(p) || desktopEnhanced(p);
+const pageAvailable = (p,id) => id === 'sr' ? vdxrVr(p) || Boolean(p?.desktop && p.desktopEnhanced)
+  : !p?.desktop || !VR_PAGES.includes(id) || Boolean(p.desktopEnhanced) && ['dlss','framegen'].includes(id);
+const vdxrFlowLabels = {Optiflow:'Optiflow',OptiflowDepth:'Optiflow + Depth',OptiflowHybrid:'Optiflow Hybrid'};
+const headTrackingPage = ['Head Tracking','Adjust how head angle moves the focus area and set the rendered eye distance.','Focus offset & eye distance'];
+const pageCopy = (p,id) => {
+  const copy = pages.find(entry => entry[0] === id).slice(1,4);
+  if (id === 'osd' && p && hasBackendMenu(p)) copy[1] = 'In-game menu and available shortcuts.';
+  if (p && desktopEnhanced(p)) {
+    if (id === 'dlss') return ['Neural Rendering','DLSS 5 image settings for monitor output.','Image quality'];
+    if (id === 'sr') copy[1] = 'DLSS upscaling and anti-aliasing for monitor output.';
+  }
+  if (vdxrVr(p)) {
+    if (id === 'pupil') return headTrackingPage;
+    if (id === 'dlss') return ['Neural Rendering','DLSS 5 image settings and adaptive quality.','Image quality'];
+    if (id === 'visual') copy[1] = 'Color, night vision, glare and vision under G.';
+  }
+  return copy;
+};
 /** Ctrl shortcuts by page, fixed so pilots keep them when the rail order changes. */
 const PAGE_KEYS = {overview:['Ctrl','1'],guide:['Ctrl','2'],engine:['Ctrl','3'],boost:['Ctrl','4'],foveation:['Ctrl','5'],dlss:['Ctrl','6'],framegen:['Ctrl','7'],pupil:['Ctrl','8'],visual:['Ctrl','9'],osd:['Ctrl','0'],diagnostics:['Ctrl','Shift','C']};
 // The feature checklist on the Overview; each feature has its own page. First what every pilot can use (monitor or any
@@ -28,6 +48,7 @@ const FEATURES = [
   ['boost','CPU Boost','CPU scheduling','boost'],
   ['quad','Quad Views','foveated rendering · VR','foveation'],
   ['dlss','DLSS 5','neural rendering · VR','dlss'],
+  ['sr','Super Resolution','DLSS upscaling','sr'],
   ['framegen','Frame generation','generated frames · VR','framegen']
 ];
 /** The engine optimizations a profile turns on (Engine Optimizations page). */
@@ -36,6 +57,13 @@ let state, profile, dcs = '', options = '', page = 'overview', busy = false, pla
 let sequence = 0, toastTimer, searchResults = [], lastProvider = 'QuadViewsFoveated', lastFrameGen = 'Nvidia', savedDraftJson = null, draftTimer, flight = null;
 const pending = new Map(), fields = [], invalid = new Set();
 const clone = value => JSON.parse(JSON.stringify(value));
+const vdxrFocusMaxBias = 45;
+function copyProfile(value) {
+  const profile = clone(value);
+  for (const key of ['vdxrFocusHorizontalBias','vdxrFocusVerticalBias'])
+    profile[key] = Math.max(-vdxrFocusMaxBias,Math.min(vdxrFocusMaxBias,profile[key]));
+  return profile;
+}
 let pendingDxgiAction = null;
 const dxgiAcknowledged = dxgi => { try { return localStorage.getItem('dxgiAck:'+dxgi.sha256) === '1'; } catch { return false; } };
 const NO_TIMEOUT = new Set(['browse','save','import','export','importSboys','prepareSboys','diagnosticPackage','launch','apply','restore','grantWriteAccess','resumeTobii','updateInstall']);
@@ -138,7 +166,8 @@ function askDxgiFirst(action) {
   const dxgi = state?.foreignDxgi; if (!dxgi || dxgiAcknowledged(dxgi)) return false;
   pendingDxgiAction = action;
   const name = dxgi.product || 'another program';
-  $('dxgiText').textContent = `DCS's bin folder has a dxgi.dll from ${name}, and DLSS 5 needs that file name. Keep it working: DCS Control backs it up and loads it together with DLSS 5, so ${name} still works in DCS. Set it aside: it is backed up and stays off in DCS while this profile is applied.`;
+  const renderer = profile.desktop && profile.desktopEnhanced ? 'Desktop Enhanced' : 'DLSS 5';
+  $('dxgiText').textContent = `DCS's bin folder has a dxgi.dll from ${name}, and ${renderer} needs that file name. Keep it working: DCS Control backs it up and loads it together with ${renderer}, so ${name} still works in DCS. Set it aside: it is backed up and stays off in DCS while this profile is applied.`;
   $('dxgiDialog').showModal(); return true;
 }
 /** askDxgiFirst after the checks caught up with the last edit (DLSS 5 just turned on brings the dxgi.dll question). */
@@ -159,7 +188,7 @@ function setFieldValue(f, value) {
   syncSegment(f); if (f.listSummary) renderListSummary(f);
 }
 function sync(next) {
-  state = next; if (next.version) $('appVersion').textContent = next.version.split('-')[0]; profile = clone(next.profile); dcs = next.dcs ?? ''; options = next.options ?? ''; plan = next.plan; invalid.clear();
+  state = next; if (next.version) $('appVersion').textContent = next.version.split('-')[0]; profile = copyProfile(next.profile); dcs = next.dcs ?? ''; options = next.options ?? ''; plan = next.plan; invalid.clear();
   rememberProvider(profile);
   if (profile.frameGen !== 'Off') lastFrameGen = profile.frameGen;
   fields.forEach(f => setFieldValue(f, f.path === 'dcs' ? dcs : f.path === 'options' ? options : profile[f.path]));
@@ -173,8 +202,9 @@ function sync(next) {
 function rememberProvider(p) { if (p.quadViews === 'PimaxNative' || (p.quadViews === 'QuadViewsFoveated' && nativeAllowed(p))) lastProvider = p.quadViews; }
 /** The open page's panels that follow the draft (also after Import, Rescan and other replies). */
 function renderPage() {
+  if (page === 'osd') refreshMenuShortcut();
   if (page === 'engine') renderEngine();
-  if (page === 'pupil') { renderPupilNeeds(); renderPupil(); }
+  if (page === 'pupil' && !vdxrVr(profile)) { renderPupilNeeds(); renderPupil(); }
   if (page === 'foveation') renderStabilityNeeds();
   if (page === 'visual') renderVisualNeeds();
   if (page === 'guide') renderGuide();
@@ -183,31 +213,43 @@ function renderPage() {
 // The <uses-rules> regions are pure twins of C# rules (VrProfile.Uses*, ProfileValidation.ResolveFeatures); the C# tests
 // run them in Node over a table of profiles and compare ("UI rules match C#"). Keep them free of DOM and app state.
 // <uses-rules>
+const vdxrVr = p => p?.runtime === 'Vdxr' && !p.desktop;
+const vdxrQuad = p => vdxrVr(p) && p.quadViews === 'CheekyNative';
+const desktopEnhanced = p => Boolean(p.desktop && p.desktopEnhanced);
+const screenSettings = p => ({neuralRendering:true,neuralBeforeUpscaling:true,workingScale:1,intensity:1,localToneStrength:1,localStructureStrength:1,modelStyle:'Standard',automaticMask:true,skinStructureStrength:1,colourStrength:1,transferStrength:1,paperWhiteScale:1,depthConvention:'Game',peripheralCompression:false,centerWidth:80,centerHeight:80,peripheralRetention:50,superResolution:true,quality:'Quality',preset:0,overrideResolution:false,outputDisplay:'',outputWidth:2560,outputHeight:1440,frameGeneration:false,frameGenerationFactor:2,matchDisplayRefresh:true,renderedFpsCap:0,dynamicFrameGeneration:false,outputFrameLimit:'MatchRefresh',frameRateTarget:0,showFps:false,logToFile:false,...p.optiScaler});
 /** Foveated Super Resolution runs only in stereo: with Quad Views it would redo DCS's DLSS of the focus views instead of
  *  DLSS 5 building on it, so Quad Views turns it off (resolveFeatures) and hides it. */
 const foveatedSr = p => Boolean(p.foveatedDlss) && p.quadViews === 'None';
 // The DLSS row stands for any DLSS processing: DLSS 5 neural rendering or, in stereo, Foveated Super Resolution on its own.
-const featureState = p => ({engine:Boolean(p.engineOptimizations), boost:Boolean(p.cpuBoost), quad:p.quadViews !== 'None', dlss:Boolean(p.neuralRendering || foveatedSr(p)), framegen:p.frameGen !== 'Off'});
+const featureState = p => ({engine:Boolean(p.engineOptimizations), boost:Boolean(p.cpuBoost), quad:!desktopEnhanced(p) && p.quadViews !== 'None', dlss:desktopEnhanced(p) ? screenSettings(p).neuralRendering : Boolean(p.neuralRendering || foveatedSr(p)), sr:desktopEnhanced(p) ? screenSettings(p).superResolution : vdxrQuad(p) && Boolean(p.vdxrCenterSr), framegen:desktopEnhanced(p) ? screenSettings(p).frameGeneration : p.frameGen !== 'Off'});
 /** Pimax native Quad Views exists only on the Pimax route and cannot host the focus adapter DLSS 5 needs. */
-const nativeAllowed = p => p.runtime !== 'SboysSteamVr' && !p.neuralRendering;
+const nativeAllowed = p => p.runtime === 'Pimax' && !p.neuralRendering;
 /** Cheeky without Quad Views (stereo): it clamps the focus and periphery ratios to at least 0.2. */
 const stereoCheeky = p => Boolean(p.neuralRendering || p.foveatedDlss) && p.quadViews === 'None';
 const CHEEKY_MIN = .2;
 /** Settles combinations that cannot run, so a draft is always deployable as far as the features go. */
 function resolveFeatures(p) {
-  // Optimizations only keeps the VR settings for the next VR flight; they do not run (C# VrProfile.ForLaunch).
+  // Both desktop routes keep the VR settings for the next VR flight; they do not run (C# VrProfile.ForLaunch).
   // Foveated Super Resolution is for stereo only (same rule as ProfileValidation.ResolveFeatures).
+  if (p.runtime === 'Vdxr') { p.gaze = 'Fixed'; p.foveaSource = 'Profile'; p.refreshFromHeadset = false; p.foveatedDlss = false; if (p.frameGen !== 'Off') p.frameGen = 'Nvidia'; if (p.quadViews !== 'None') p.quadViews = 'CheekyNative'; }
+  else if (p.quadViews === 'CheekyNative') p.quadViews = 'QuadViewsFoveated';
   if (p.quadViews !== 'None') p.foveatedDlss = false;
-  const cheeky = p.neuralRendering || p.foveatedDlss;
+  const cheeky = p.neuralRendering || p.foveatedDlss || (p.runtime === 'Vdxr' && p.frameGen !== 'Off');
   // Pimax native Quad Views exists only in Pimax Play, and it cannot host the focus adapter that DLSS 5 needs.
-  if (p.quadViews === 'PimaxNative' && (p.runtime === 'SboysSteamVr' || cheeky)) p.quadViews = 'QuadViewsFoveated';
+  if (p.quadViews === 'PimaxNative' && (p.runtime !== 'Pimax' || cheeky)) p.quadViews = 'QuadViewsFoveated';
   // With Quad Views, Cheeky always runs on the focus views through the adapter.
-  p.quadFocusAdapter = Boolean(cheeky && p.quadViews === 'QuadViewsFoveated');
+  p.quadFocusAdapter = Boolean(p.runtime !== 'Vdxr' && cheeky && p.quadViews === 'QuadViewsFoveated');
   return p;
 }
 // </uses-rules>
 function setFeature(p, key, on) {
+  if (desktopEnhanced(p) && key === 'quad') return p;
+  if (desktopEnhanced(p) && ['dlss','sr','framegen'].includes(key)) {
+    p.optiScaler = {...screenSettings(p),[{dlss:'neuralRendering',sr:'superResolution',framegen:'frameGeneration'}[key]]:on};
+    return p;
+  }
   if (key === 'quad') p.quadViews = on ? (p.quadViews !== 'None' ? p.quadViews : lastProvider) : 'None';
+  if (key === 'sr' && vdxrQuad(p)) p.vdxrCenterSr = on;
   // Checking it turns DLSS 5 on unless Foveated Super Resolution already runs; unchecking turns both off.
   if (key === 'dlss') { if (!on) { p.neuralRendering = false; p.foveatedDlss = false; } else if (!p.neuralRendering && !p.foveatedDlss) p.neuralRendering = true; }
   // Without an NVIDIA RTX card, frame generation starts as FidelityFX (it runs on any graphics card).
@@ -218,7 +260,17 @@ function setFeature(p, key, on) {
 }
 /** Profile name and id follow the route and the features, e.g. "Pimax · Quad Views + DLSS 5 + Frame generation + CPU Boost". */
 function deriveIdentity(p) {
-  if (p.desktop) return {id:'desktop-optimizations',name:'Optimizations only'};  const route = p.runtime === 'SboysSteamVr' ? 'Sboys' : 'Pimax', parts = [];
+  if (desktopEnhanced(p)) {
+    const s = screenSettings(p), parts = [];
+    if (s.neuralRendering) parts.push(['nr','NR']);
+    if (s.superResolution) parts.push(['sr','Super resolution']);
+    if (s.frameGeneration) parts.push(['fg','DLSS frame generation']);
+    if (p.cpuBoost) parts.push(['boost','CPU Boost']);
+    if (p.engineOptimizations) parts.push(['opt','Engine Optimizations']);
+    return {id:'desktop-enhanced-'+(parts.length ? parts.map(x => x[0]).join('-') : 'original'),name:'Desktop Enhanced · '+(parts.length ? parts.map(x => x[1]).join(' + ') : 'Native-resolution AA')};
+  }
+  if (p.desktop) return {id:'desktop-optimizations',name:'Optimizations only'};
+  const route = p.runtime === 'SboysSteamVr' ? 'Sboys' : p.runtime === 'Vdxr' ? 'VDXR' : 'Pimax', parts = [];
   if (p.quadViews === 'PimaxNative') parts.push(['nativeqv','Pimax Quad Views']); else if (p.quadViews !== 'None') parts.push(['qv','Quad Views']);
   if (p.neuralRendering) parts.push(['dlss5','DLSS 5']); else if (foveatedSr(p)) parts.push(['fdlss','Foveated Super Resolution']);
   if (p.frameGen !== 'Off') parts.push(['fg','Frame generation']);
@@ -229,13 +281,13 @@ function deriveIdentity(p) {
 /** A copy of a profile with the route, focus movement and features chosen (used by the checklist and guided setup). */
 function withFeatures(source, {route, features, gaze}) {
   const p = clone(source);
-  if (route === 'Desktop') p.desktop = true;
+  if (route === 'Desktop' || route === 'DesktopEnhanced') { p.desktop = true; p.desktopEnhanced = route === 'DesktopEnhanced'; }
   else if (route) { p.desktop = false; if (route !== p.runtime) { p.runtime = route; p.runtimeManifestPath = null; } }
   if (gaze) p.gaze = gaze;
   for (const [key] of FEATURES) setFeature(p, key, Boolean(features[key]));
   return Object.assign(p, deriveIdentity(p));
 }
-const pimaxSource = p => quad(p) && p.foveaSource === 'PimaxPlay';
+const pimaxSource = p => p.runtime !== 'Vdxr' && quad(p) && p.foveaSource === 'PimaxPlay';
 /** The focus values that reach the provider: converted from Pimax Play when the profile follows it. */
 function effectiveFovea(p) {
   // A Pimax preset's values cannot be read: the profile's own values are written then.
@@ -249,6 +301,12 @@ function effectiveFovea(p) {
 const refreshHz = p => p.refreshFromHeadset && state?.headsetRefresh?.hz ? state.headsetRefresh.hz : p.headsetRefreshHz;
 const PRIORITY = {Normal:'Normal priority',AboveNormal:'Above normal',High:'High priority'};
 function featureSummary(key, p) {
+  if (desktopEnhanced(p)) {
+    const s = screenSettings(p);
+    if (key === 'dlss') return s.neuralRendering ? `NR on · intensity ${num(s.intensity)}×` : 'Off · NR bypassed';
+    if (key === 'sr') return s.superResolution ? 'DLSS · '+s.quality : 'Off · native-resolution AA';
+    if (key === 'framegen') return s.frameGeneration ? `DLSS frame generation · ${s.frameGenerationFactor}×` : 'Off · rendered frames only';
+  }
   if (key === 'engine') {
     if (!p.engineOptimizations) return 'Off · DCS as shipped';
     // The terrain prefetch fix counts as one more part when it skips repeats (Observe only counts calls).
@@ -257,6 +315,7 @@ function featureSummary(key, p) {
   }
   if (key === 'quad') {
     if (p.quadViews === 'None') return 'Off · normal stereo rendering';
+    if (vdxrQuad(p)) return `Focus ${p.vdxrFocusWidth}% × ${p.vdxrFocusHeight}%`;
     if (p.quadViews === 'PimaxNative') return 'Pimax native · ' + (state?.pimax?.found ? 'Pimax ' + state.pimax.short : 'uses Pimax Play settings');
     const e = effectiveFovea(p), gaze = p.gaze === 'EyeTracked' ? 'eye tracked' : 'fixed';
     if (p.quadViewsLayerDirectory) return 'Alternative provider · '+gaze;
@@ -266,13 +325,20 @@ function featureSummary(key, p) {
   }
   if (key === 'dlss') {
     if (!p.neuralRendering) return foveatedSr(p) ? 'Foveated Super Resolution on · DLSS 5 off' : 'Off · original image';
-    const area = p.quadFocusAdapter ? (p.neuralFocusArea < 100 ? 'Central '+p.neuralFocusArea+'%' : 'Whole focus area') : 'Whole view';
+    const area = vdxrQuad(p) ? (p.vdxrJointNr ? 'Focus and periphery' : 'Focus only')
+      : p.quadFocusAdapter ? (p.neuralFocusArea < 100 ? 'Central '+p.neuralFocusArea+'%' : 'Whole focus area') : 'Whole view';
     return [area, p.neuralStyle, foveatedSr(p) ? 'Foveated SR' : null, p.neuralRuntimePath || state?.savedRuntime ? null : 'runtime file missing'].filter(Boolean).join(' · ');
+  }
+  if (key === 'sr') {
+    if (!vdxrQuad(p)) return 'Requires Quad Views';
+    if (!p.vdxrCenterSr) return 'Off · game settings';
+    const scale = p.vdxrCenterSupersampling;
+    return `Center ${num(scale)}×${p.vdxrAutomaticSr && scale > 1 ? ' · auto scale' : ''}`;
   }
   if (key === 'framegen') {
     if (p.frameGen === 'Off') return 'Off · rendered frames only';
-    const factor = usesAdaptiveCadence(p) ? 'only when needed' : p.frameGenFactor === 0 ? 'Auto 2×/3×' : p.frameGenFactor+'×';
-    return `${p.frameGen === 'Nvidia' ? 'NVIDIA' : 'FidelityFX'} · ${factor} · renders ${usesAdaptiveCadence(p) ? 'up to ' : ''}${Number((refreshHz(p)/capDivider(p)).toFixed(1))} FPS`;
+    const factor = usesAdaptiveCadence(p) ? 'only when needed' : p.frameGenFactor === 0 ? (p.runtime === 'Vdxr' ? 'Auto' : 'Auto 2×/3×') : p.frameGenFactor+'×';
+    return `${vdxrVr(p) ? vdxrFlowLabels[p.vdxrFrameGenMethod] : p.frameGen === 'Nvidia' ? 'NVIDIA' : 'FidelityFX'} · ${factor} · renders ${usesAdaptiveCadence(p) ? 'up to ' : ''}${Number((refreshHz(p)/capDivider(p)).toFixed(1))} FPS`;
   }
   // The flight helpers on the same page run with or without CPU Boost.
   const vr = !p.desktop;
@@ -283,7 +349,11 @@ function featureSummary(key, p) {
 }
 /** Short notes under a feature, only when they matter: [kind, text, field to reveal, link label]. */
 function featureNotes(p) {
-  const notes = {engine:[],boost:[],quad:[],dlss:[],framegen:[]}, cheeky = p.neuralRendering || p.foveatedDlss;
+  const notes = {engine:[],boost:[],quad:[],dlss:[],sr:[],framegen:[]}, cheeky = p.neuralRendering || p.foveatedDlss;
+  if (desktopEnhanced(p)) {
+    if (p.cpuBoost && p.boostElevated) notes.boost.push(['info','Asks for administrator rights (UAC) at launch.']);
+    return notes;
+  }
   // Only when the provider the user picked (Pimax native) was replaced.
   if (p.quadViews === 'QuadViewsFoveated' && lastProvider === 'PimaxNative' && !nativeAllowed(p))
     notes.quad.push(['info',cheeky ? "Bundled: Pimax native can't host DLSS 5." : 'Bundled: Pimax native is Pimax-route only.']);
@@ -297,12 +367,20 @@ function featureNotes(p) {
 function noteHtml([kind,text,path,action]) { return `<div class="feature-note ${kind}"><span>${escape(text)}</span>${path ? `<button class="link-button" data-reveal="${path}"${action === 'Select file' ? ' data-browse-after="1"' : ''}>${escape(action)} →</button>` : ''}</div>`; }
 function renderFeatures() {
   const on = featureState(profile), notes = featureNotes(profile);
-  FEATURES.forEach(([key]) => {
+  if (desktopEnhanced(profile) && state?.gpu?.desktopFrameGeneration?.supported === false)
+    notes.framegen.push(['info',state.gpu.desktopFrameGeneration.note]);
+  FEATURES.forEach(([key,label]) => {
     const item = $('feature-'+key); item.classList.toggle('on',on[key]);
     // On a monitor or with another headset only the optimizations are features here.
-    item.hidden = Boolean(profile.desktop) && !['engine','boost'].includes(key);
-    if (key === 'quad') $('featureGroup-vr').hidden = Boolean(profile.desktop);
-    const box = $('featureCheck-'+key); box.checked = on[key]; box.disabled = busy;
+    item.hidden = key === 'sr' ? !desktopEnhanced(profile) && !vdxrVr(profile) : Boolean(profile.desktop) && !['engine','boost',...(desktopEnhanced(profile) ? ['dlss','framegen'] : [])].includes(key);
+    if (key === 'quad') { $('featureGroup-vr').hidden = Boolean(profile.desktop) && !desktopEnhanced(profile); $('featureGroup-vr').textContent = desktopEnhanced(profile) ? 'Screen rendering' : 'VR'; }
+    const title = key === 'dlss' && (desktopEnhanced(profile) || vdxrVr(profile)) ? 'Neural Rendering' : label;
+    item.querySelector('.feature-text>b').textContent = title;
+    const open = item.querySelector('.feature-open');
+    open.title = `Open ${title} settings`; open.setAttribute('aria-label',open.title);
+    const box = $('featureCheck-'+key); box.checked = on[key]; box.disabled = busy
+      || (key === 'sr' && vdxrVr(profile) && !vdxrQuad(profile))
+      || (desktopEnhanced(profile) && key === 'framegen' && state?.gpu?.desktopFrameGeneration?.supported === false && !on[key]);
     const summary = featureSummary(key,profile); $('featureSummary-'+key).textContent = summary; $('featureSummary-'+key).title = summary;
     $('featureNotes-'+key).innerHTML = notes[key].map(noteHtml).join('');
   });
@@ -313,7 +391,7 @@ function renderFeatures() {
 /** Back to the applied profile's settings, exactly as Launch DCS would use them. */
 function resetToApplied() {
   if (busy || !state?.appliedDraft) return;
-  profile = clone(state.appliedDraft); invalid.clear(); rememberProvider(profile);
+  profile = copyProfile(state.appliedDraft); invalid.clear(); rememberProvider(profile);
   // The DCS install and options.lua the applied profile was written to.
   if (state.appliedDcs) dcs = state.appliedDcs; if (state.appliedOptions) options = state.appliedOptions;
   fields.forEach(f => { if (f.path === 'dcs') setFieldValue(f, dcs); else if (f.path === 'options') setFieldValue(f, options); });
@@ -335,10 +413,10 @@ function change() {
 /** "What happens at launch" depends only on the Boost settings and the route: refreshed for those edits, not every edit. */
 function boostChanged() { if (page === 'boost') refreshBoostPlan(); }
 // Fields the checklist and the route switch can change; other fields only change through their own input.
-const FEATURE_FIELDS = ['quadViews','neuralRendering','foveatedDlss','frameGen','cpuBoost','engineOptimizations','pauseTobiiDesktop','runtimeManifestPath'];
+const FEATURE_FIELDS = ['quadViews','neuralRendering','foveatedDlss','vdxrCenterSr','frameGen','vdxrFrameGenMethod','cpuBoost','engineOptimizations','pauseTobiiDesktop','runtimeManifestPath','optiScaler'];
 /** Shows profile values in the fields (all, or only `paths`), never overwriting an entry the user is correcting. */
 function showProfile(paths) {
-  fields.forEach(f => { if (f.path === 'dcs' || f.path === 'options' || invalid.has(f.path) || (paths && !paths.includes(f.path))) return; setFieldValue(f, profile[f.path]); });
+  fields.forEach(f => { if (f.path === 'dcs' || f.path === 'options' || invalid.has(f.path) || (paths && !paths.includes(f.path) && !paths.includes(f.prop))) return; setFieldValue(f, profile[f.path]); });
 }
 /** Help text as [lead, detail]: the lead shows, the detail waits behind a More button (a plain string is a lead alone). */
 // One sentence stays on screen under a setting's name; the rest waits behind More. A long lead of several sentences is
@@ -363,10 +441,10 @@ function nameMoreButtons() {
   });
 }
 let cardMoreCount = 0;
-function card(parent,title,subtitle) {
+function card(parent,title,subtitle = '') {
   const panel = document.createElement('div'); panel.className = 'card';
   const [lead, detail] = helpParts(subtitle), more = detail ? 'more-card-'+(++cardMoreCount) : '';
-  panel.innerHTML = `<div class="card-heading"><div><h2>${title}</h2><p class="fine">${more ? gluedMore(lead,more) : lead}</p>${more ? `<p class="setting-more" id="${more}" hidden>${detail}</p>` : ''}</div></div>`; $(parent).append(panel); return panel;
+  panel.innerHTML = `<div class="card-heading"><div><h2>${title}</h2>${lead ? `<p class="fine">${more ? gluedMore(lead,more) : lead}</p>` : ''}${more ? `<p class="setting-more" id="${more}" hidden>${detail}</p>` : ''}</div></div>`; $(parent).append(panel); return panel;
 }
 /** A run of simple switches, drawn as one compact list inside a card or a fold. */
 function toggleList(parent) { const list = document.createElement('div'); list.className = 'toggle-list'; parent.append(list); return list; }
@@ -398,7 +476,7 @@ const tuneSummary = (ev,sat) => { const b = Number(profile[ev] ?? 0), c = Number
   return `Brightness ${b > 0 ? '+' : b < 0 ? '−' : '±'}${num(Math.abs(b))} · Saturation ${Math.round(c*100)}%`; };
 const shown = path => { const f = fields.find(x => x.path === path), v = f.map ? f.map.get(profile) : profile[path];
   return f.type === 'number' ? num(v)+(f.unit === 'ratio' ? '×' : f.unit === '°' ? '°' : f.unit ? ' '+f.unit : '') : f.type === 'select' ? f.input.selectedOptions[0]?.textContent.split(' · ')[0] : v ? 'on' : 'off'; };
-/** A select with 2 to 4 short choices drawn as a segmented radio group. The select stays the field's input and its
+/** A select with short choices drawn as a segmented radio group. The select stays the field's input and its
  *  only source of truth; the buttons follow it (syncSegment). labels: {option value: short text}. */
 function segmented(f, labels = {}) {
   const select = f.input, path = f.path, label = f.element.querySelector(`label[for="${select.id}"]`);
@@ -418,7 +496,7 @@ function segmented(f, labels = {}) {
   const choose = b => { if (!b || b.disabled) return; if (select.value !== b.dataset.value) { select.value = b.dataset.value; select.dispatchEvent(new Event('change',{bubbles:true})); } syncSegment(f); };
   group.addEventListener('click',e => choose(e.target.closest('button')));
   group.addEventListener('keydown',e => {
-    const enabled = buttons.filter(b => !b.disabled); if (!enabled.length) return;
+    const enabled = buttons.filter(b => !b.disabled && !b.hidden); if (!enabled.length) return;
     const at = Math.max(0, enabled.indexOf(e.target.closest('button'))), n = enabled.length;
     const next = {ArrowLeft:at-1,ArrowUp:at-1,ArrowRight:at+1,ArrowDown:at+1,Home:0,End:n-1}[e.key]; if (next === undefined) return;
     e.preventDefault(); const target = enabled[(next+n)%n]; choose(target); target.focus();
@@ -427,11 +505,11 @@ function segmented(f, labels = {}) {
 }
 function syncSegment(f) {
   if (!f.segments) return; const {group,buttons} = f.segments, select = f.input;
-  buttons.forEach((b,i) => { const o = select.options[i]; b.setAttribute('aria-checked',String(o.value === select.value)); b.disabled = select.disabled || o.disabled; b.title = o.textContent; });
-  const stop = buttons.find(b => b.getAttribute('aria-checked') === 'true' && !b.disabled) || buttons.find(b => !b.disabled);
+  buttons.forEach((b,i) => { const o = select.options[i]; b.setAttribute('aria-checked',String(o.value === select.value)); b.disabled = select.disabled || o.disabled; b.hidden = o.hidden; b.title = o.textContent; });
+  const stop = buttons.find(b => b.getAttribute('aria-checked') === 'true' && !b.disabled && !b.hidden) || buttons.find(b => !b.disabled && !b.hidden);
   buttons.forEach(b => b.tabIndex = b === stop ? 0 : -1); group.setAttribute('aria-disabled',String(select.disabled));
   // While the setting itself can change, a choice that cannot be picked shows the reason its option text gives ("· not with DLSS 5").
-  const why = select.disabled ? [] : buttons.filter((b,i) => b.disabled && select.options[i].textContent.includes(' · ')).map(b => `${b.textContent}: ${b.title.split(' · ').slice(1).join(' · ')}.`);
+  const why = select.disabled ? [] : buttons.filter((b,i) => b.disabled && !b.hidden && select.options[i].textContent.includes(' · ')).map(b => `${b.textContent}: ${b.title.split(' · ').slice(1).join(' · ')}.`);
   const text = why.join(' '); if (f.segments.note.textContent !== text) f.segments.note.textContent = text; f.segments.note.hidden = !text;
 }
 /** A list field's one-line summary ("None", or "N programs: a, b, c +K") above its folded textarea. */
@@ -526,8 +604,10 @@ function keyProblem([vk,mods]) {
   return null;
 }
 const HOTKEYS = {
-  neuralToggleKey:{others:['diagnosticOverlayKey','engineToggleKey','pupilShiftToggleKey','depthBoostToggleKey','farDepthToggleKey','colorModeKey'],used:p => p.neuralRendering,name:'DLSS 5',fallback:'Ctrl+Shift+F12'},
-  diagnosticOverlayKey:{others:['neuralToggleKey','engineToggleKey','pupilShiftToggleKey','depthBoostToggleKey','farDepthToggleKey','colorModeKey'],used:p => !p.desktop && (p.frameGen !== 'Off' || p.headsetPanel),name:'headset panel',fallback:'Alt+Shift+F12'},
+  vdxrMenuKey:{menu:true,others:['engineToggleKey','colorModeKey'],fallback:'119:0'},
+  desktopMenuKey:{menu:true,others:['engineToggleKey'],fallback:'45:0'},
+  neuralToggleKey:{others:['diagnosticOverlayKey','engineToggleKey','pupilShiftToggleKey','depthBoostToggleKey','farDepthToggleKey','colorModeKey'],used:p => !p.desktop && !vdxrVr(p) && p.neuralRendering,name:'DLSS 5',fallback:'Ctrl+Shift+F12'},
+  diagnosticOverlayKey:{others:['neuralToggleKey','engineToggleKey','pupilShiftToggleKey','depthBoostToggleKey','farDepthToggleKey','colorModeKey'],used:p => !p.desktop && !vdxrVr(p) && (p.frameGen !== 'Off' || p.headsetPanel),name:'headset panel',fallback:'Alt+Shift+F12'},
   engineToggleKey:{others:['neuralToggleKey','diagnosticOverlayKey','pupilShiftToggleKey','depthBoostToggleKey','farDepthToggleKey','colorModeKey'],used:p => p.engineOptimizations,name:'Engine Optimizations',fallback:'122:6'},
   pupilShiftToggleKey:{others:['neuralToggleKey','diagnosticOverlayKey','engineToggleKey','depthBoostToggleKey','farDepthToggleKey','colorModeKey'],used:p => usesPupilShift(p),name:'Pupil shift',fallback:'121:5'},
   depthBoostToggleKey:{others:['neuralToggleKey','diagnosticOverlayKey','engineToggleKey','pupilShiftToggleKey','farDepthToggleKey','colorModeKey'],used:p => usesDepthBoost(p),name:'Depth boost',fallback:'121:6'},
@@ -564,8 +644,13 @@ function captureHotkey(f) {
     if (refused) { showHotkey(f,refused,'error'); prompt(0); return; }
     if (vk === 27 && !mods) { stop(); return; }
     let next = [vk,mods];
-    if ((vk === 8 || vk === 46) && !mods) next = [0,0];
-    const problem = keyProblem(next);
+    if (!info.menu && (vk === 8 || vk === 46) && !mods) next = [0,0];
+    const problem = info.menu
+      ? f.path === 'vdxrMenuKey' && mods ? 'Press a single key.'
+        : mods & 4 ? 'Use Ctrl or Alt with this key.'
+        : vk < 8 || vk === 20 || vk === 27 || (vk >= 160 && vk <= 165) ? 'Choose another key.'
+        : mods ? keyProblem(next) : null
+      : keyProblem(next);
     if (problem) { showHotkey(f,problem,'error'); prompt(0); return; }
     const taken = info.others.find(o => HOTKEYS[o].used(profile) && (k => k && keyCode(k) === keyCode(next))(parseKey(profile[o] ?? HOTKEYS[o].fallback)));
     if (next[0] && taken) { showHotkey(f,`${keyLabel(next)} is already the ${HOTKEYS[taken].name} key.`,'error'); prompt(0); return; }
@@ -586,7 +671,7 @@ function captureHotkey(f) {
     if (busy || button.disabled) return;
     if (button.classList.contains('capturing')) { stop(); return; }
     button.classList.add('capturing'); button.setAttribute('aria-pressed','true'); prompt(0); $('default-'+f.path).hidden = true;
-    $('keynote-'+f.path).textContent = 'Esc cancels · Backspace clears'; $('keynote-'+f.path).className = 'hotkey-note';
+    $('keynote-'+f.path).textContent = info.menu ? 'Esc cancels' : 'Esc cancels · Backspace clears'; $('keynote-'+f.path).className = 'hotkey-note';
     window.addEventListener('keydown',onKey,true); window.addEventListener('keyup',onUp,true);
   });
   button.addEventListener('blur',() => { if (button.classList.contains('capturing')) stop(); });
@@ -594,10 +679,94 @@ function captureHotkey(f) {
 // <uses-rules>
 /** quad: the bundled Quad Views (VrProfile.UsesBundledQuadViews); a blank layer folder is no folder. */
 const nr = p => p.neuralRendering, flow = p => p.frameGen === 'Nvidia', quad = p => p.quadViews === 'QuadViewsFoveated' && !String(p.quadViewsLayerDirectory ?? '').trim();
+const rendererNr = p => desktopEnhanced(p) ? screenSettings(p).neuralRendering : p.neuralRendering;
+const screenMapping = key => ({prop:'optiScaler',get:p => screenSettings(p)[key],set:(p,value) => { p.optiScaler = {...screenSettings(p),[key]:value}; }});
+let customOutputResolution = false;
+const outputSizeKey = (width,height) => `${width}x${height}`;
+function outputResolutionOptions(p) {
+  const s = screenSettings(p), displays = state?.outputDisplays || [], display = displays.find(d => d.id === s.outputDisplay) || displays[0];
+  const sizes = new Map();
+  for (const mode of display?.modes || []) sizes.set(outputSizeKey(mode.width,mode.height),[mode.width,mode.height]);
+  const options = [['follow','Follow DCS']];
+  const detected = state?.dcsOutputResolution, width = Number(detected?.width), height = Number(detected?.height);
+  if (width > 0 && height > 0) { options.push([outputSizeKey(width,height),`${width} × ${height} · DCS configuration`]); sizes.delete(outputSizeKey(width,height)); }
+  for (const [key,[w,h]] of [...sizes].sort((a,b) => b[1][0]-a[1][0] || b[1][1]-a[1][1])) options.push([key,`${w} × ${h}`]);
+  return [...options,['custom','Custom']];
+}
+function outputResolutionChoice(p) {
+  const s = screenSettings(p), key = outputSizeKey(s.outputWidth,s.outputHeight);
+  return !s.overrideResolution ? 'follow' : !customOutputResolution && outputResolutionOptions(p).some(([value]) => value === key) ? key : 'custom';
+}
+function fillOutputChoices() {
+  if (!profile) return;
+  const display = fields.find(f => f.path === 'optiScalerOutputDisplay'), resolution = fields.find(f => f.path === 'optiScalerOutputResolution');
+  const options = [['','Primary display'],...(state?.outputDisplays || []).map(d => [d.id,`${d.name} · ${d.width} × ${d.height}`])];
+  display.input.innerHTML = options.map(([value,label]) => `<option value="${escape(value)}">${escape(label)}</option>`).join('');
+  resolution.input.innerHTML = outputResolutionOptions(profile).map(([value,label]) => `<option value="${value}">${escape(label)}</option>`).join('');
+  setFieldValue(display); setFieldValue(resolution);
+}
+/** SpatialWarp.BuildAxis with a centered axis, followed by CompressAxis from the NR spatial shader. */
+function spatialPreviewAxis(u,center,working) {
+  const r = 2*Math.abs(u-.5);
+  if (r <= center) return u;
+  const t = (r-center)/(1-center), k = (working-center)/(1-center);
+  const p = center+(working-center)*t/(k+(1-k)*t);
+  return .5+Math.sign(u-.5)*p/2;
+}
+function updateCompressionPreview() {
+  if (!desktopEnhanced(profile)) return;
+  const s = screenSettings(profile);
+  const box = $('desktopCompressionPreview'), detected = state?.dcsOutputResolution;
+  const width = s.overrideResolution ? s.outputWidth : Number(detected?.width), height = s.overrideResolution ? s.outputHeight : Number(detected?.height);
+  box.classList.toggle('is-idle',!s.neuralRendering || !s.peripheralCompression);
+  if (!(width > 0 && height > 0)) { box.innerHTML = '<p class="fine">Read DCS settings to preview the configured output dimensions.</p>'; return; }
+  const w = 1000, h = w*height/width, cx = s.centerWidth/100, cy = s.centerHeight/100;
+  const wx = cx+(1-cx)*s.peripheralRetention/100, wy = cy+(1-cy)*s.peripheralRetention/100;
+  const rect = (x,y,kind) => `<rect class="${kind}" x="${(1-x)*w/2}" y="${(1-y)*h/2}" width="${x*w}" height="${y*h}"/>`;
+  const picture = compressed => {
+    const x = u => w*(compressed ? spatialPreviewAxis(u,cx,wx) : u), y = u => h*(compressed ? spatialPreviewAxis(u,cy,wy) : u);
+    let grid = '';
+    for (let i=0;i<=20;i++) { const p = i/20; grid += `<path d="M ${x(p)} ${y(0)} V ${y(1)} M ${x(0)} ${y(p)} H ${x(1)}"/>`; }
+    return `<svg viewBox="0 0 ${w} ${h}" role="img" aria-label="${compressed ? 'Compressed NR layout' : 'Target output layout'}"><rect class="spatial-output" width="${w}" height="${h}"/><g class="spatial-grid">${grid}</g>${compressed ? rect(wx,wy,'spatial-working') : ''}${rect(cx,cy,'spatial-center')}</svg>`;
+  };
+  box.innerHTML = `<div class="spatial-pictures"><figure>${picture(false)}<figcaption>Output layout</figcaption></figure><figure>${picture(true)}<figcaption>Compressed layout</figcaption></figure></div><p class="fine">${width} × ${height} · ${s.overrideResolution ? 'specified output' : 'follows DCS'} · proportional grid</p><p class="spatial-legend"><span>Full-density center ${num(s.centerWidth)}% × ${num(s.centerHeight)}%</span><span>Peripheral retention ${num(s.peripheralRetention)}% · spatial area ${num(wx*wy*100)}%</span></p>`;
+}
+function renderVdxrFocusPreview(p) {
+  if (!vdxrVr(p)) return;
+  const width = p.vdxrFocusWidth, height = p.vdxrFocusHeight;
+  const focusHeight = height*.75, shortSide = Math.min(width,focusHeight);
+  const x = (100-width)/2, y = (75-focusHeight)/2;
+  const radius = p.vdxrFocusCustomBlend ? shortSide*p.vdxrFocusCornerRadius/100 : 0;
+  const feather = p.vdxrFocusCustomBlend ? shortSide*p.vdxrFocusFeather/100 : 0;
+  const hasCore = feather > 0 && 2*feather < shortSide;
+  const grid = Array.from({length:9},(_,i) => {
+    const line = (i+1)*10;
+    return `<path d="M ${line} 0 V 75 M 0 ${line*.75} H 100"/>`;
+  }).join('');
+  const preview = (x,y) => vdxrQuad(p) ? `<div class="spatial-pictures">
+    <figure><svg viewBox="0 0 100 75" role="img" aria-label="Configured focus size in one eye">
+      <rect class="spatial-output" width="100" height="75"/><g class="spatial-grid">${grid}</g>
+      <rect class="spatial-center" x="${x}" y="${y}" width="${width}" height="${focusHeight}" rx="${radius}"/>
+      ${hasCore ? `<rect class="spatial-feather" x="${x+feather}" y="${y+feather}" width="${width-2*feather}" height="${focusHeight-2*feather}" rx="${Math.max(0,radius-feather)}"/>` : ''}
+    </svg></figure>
+    <div class="spatial-legend"><span>Focus resolution · ${num(width)}% × ${num(height)}%</span><span>Focus pixels · ${num(width*height/100)}% of a full eye</span>
+      ${hasCore ? '<span>Dashed · full-detail edge</span>' : feather > 0 ? '<span>Feather reaches the center</span>' : ''}
+    </div>
+  </div>` : '<p class="fine">Enable Quad Views to preview the focus area.</p>';
+  // Match the layer's tangent-space clamp on a 90-degree horizontal reference view.
+  const projectOffset = (angle,room) => {
+    const limit = Math.atan(room/50);
+    return 50*Math.tan(Math.max(-limit,Math.min(limit,angle*Math.PI/180)));
+  };
+  const dx = p.vdxrFocusHeadOffset ? projectOffset(p.vdxrFocusHorizontalBias,x) : 0;
+  const dy = p.vdxrFocusHeadOffset ? projectOffset(p.vdxrFocusVerticalBias,y) : 0;
+  $('vdxrFocusPreview').innerHTML = preview(x,y);
+  $('headFocusPreview').innerHTML = preview(x+dx,y-dy);
+}
 /** Frame generation only when needed (VrProfile.UsesAdaptiveCadence): Auto only; a pinned 2× or 3× always generates. */
-const usesAdaptiveCadence = p => Boolean(p.frameGen !== 'Off' && !p.desktop && p.frameGenAdaptiveCadence && p.frameGenFactor === 0);
+const usesAdaptiveCadence = p => Boolean(p.runtime !== 'Vdxr' && p.frameGen !== 'Off' && !p.desktop && p.frameGenAdaptiveCadence && p.frameGenFactor === 0);
 /** The refresh rate divided by this is what DCS should render (FramePacing.CapDivider). */
-const capDivider = p => usesAdaptiveCadence(p) ? 1 : p.frameGen === 'Off' ? 1 : p.frameGenFactor === 3 ? 3 : 2;
+const capDivider = p => usesAdaptiveCadence(p) ? 1 : p.frameGen === 'Off' ? 1 : p.runtime === 'Vdxr' && p.frameGenFactor === 0 ? 1 : p.frameGenFactor === 4 ? 4 : p.frameGenFactor === 3 ? 3 : 2;
 // </uses-rules>
 const coverageOwned = p => quad(p) || stereoCheeky(p);
 const boost = p => p.cpuBoost;
@@ -619,7 +788,7 @@ function buildFields() {
   // Quad Views page: provider and focus movement (with what follows the eyes) first, then the focus area's size and shape;
   // its sharpness has its own card under the coverage preview.
   let c = card('foveationControls','Foveated rendering','Sharp where you look, lower resolution around it.');
-  segmented(field(c,'quadViews','Quad Views provider',['Bundled works with every DCS Control feature.','Pimax native uses Pimax Play\'s own Quad Views: Pimax route only, not with DLSS 5.'],'select',[['None','Off · normal stereo'],['QuadViewsFoveated','Bundled Quad Views (recommended)'],['PimaxNative','Pimax native Quad Views']]),{None:'Off',QuadViewsFoveated:'Bundled',PimaxNative:'Pimax native'});
+  segmented(field(c,'quadViews','Quad Views provider',['Bundled works with every DCS Control feature.','Pimax native uses Pimax Play\'s own Quad Views: Pimax route only, not with DLSS 5.'],'select',[['None','Off · normal stereo'],['QuadViewsFoveated','Bundled Quad Views (recommended)'],['PimaxNative','Pimax native Quad Views'],['CheekyNative','Backend Quad Views']]),{None:'Off',QuadViewsFoveated:'Bundled',PimaxNative:'Pimax native',CheekyNative:'Backend'});
   segmented(field(c,'gaze','Focus movement','Eye tracked follows your eyes; Fixed stays in the center.','select',[['EyeTracked','Eye tracked'],['Fixed','Fixed (centered)']],p => p.quadViews !== 'None'),{EyeTracked:'Eye tracked',Fixed:'Fixed'});
   const tracked = p => quad(p) && p.gaze === 'EyeTracked';
   let toggles = toggleList(c);
@@ -629,6 +798,7 @@ function buildFields() {
   let more = disclosure(c,'Alternative provider','Only to test another Quad Views build.',p => p.quadViews !== 'QuadViewsFoveated' ? 'Not used' : p.quadViewsLayerDirectory ? p.quadViewsLayerDirectory.split(/[\\/]/).filter(Boolean).pop() : 'Bundled');
   field(more,'quadViewsLayerDirectory','Alternative Quad Views provider','Folder of another Quad Views build. Leave empty for the bundled one, which DLSS 5 needs.','path',null,p => p.quadViews === 'QuadViewsFoveated');
   c = card('focusControls','Focus area','Size and detail of the sharp area, in Pimax Play\'s units.');
+  c.querySelector('.card-heading .fine').id = 'focusAreaHelp';
   segmented(field(c,'foveaSource','Focus area values',['Read from Pimax Play at every launch, or set here.','From Pimax Play: the Quad View values you set there, read again at every launch. Nothing is written to Pimax Play. Set here: choose them below, in the same units.'],'select',[['PimaxPlay','From Pimax Play (recommended)'],['Profile','Set here']],quad),{PimaxPlay:'From Pimax Play',Profile:'Set here'});
   const pimaxBox = document.createElement('div'); pimaxBox.id = 'pimaxFovea'; pimaxBox.className = 'pimax-fovea'; pimaxBox.hidden = true; c.append(pimaxBox);
   // This profile's own focus with bundled Quad Views, edited like Pimax Play's Quick sliders and converted exactly as Pimax converts them.
@@ -639,26 +809,96 @@ function buildFields() {
   field(c,'pimaxVerticalFov','Vertical FOV',['The focus area\'s share of the view\'s height.','As in Pimax Play\'s Quick mode, top to bottom.'],'number',[10,90,1],quad,'%',ownFocusHidden,{prop:'foveaHeight',get:p => whole(PIMAX.quickFromShare(p.foveaHeight)),set:(p,v) => p.foveaHeight = PIMAX.shareFromQuick(v)});
   field(c,'quadEdgeBlend','Focus edge blending',['How softly the focus area fades into the periphery.','Wider is softer but leaves a little less area in full detail. With values from Pimax Play and its Transition Mode Off, the edge is hard (0).'],'number',[0,.5,.01],quad,'ratio');
   field(c,'quadRoundFocus','Round focus area',['On: a circle. Off: a rounded rectangle, with more detail in the corners.','Either way its edge fades out over Focus edge blending. A central DLSS 5 area follows the same shape.'],'toggle',null,quad);
+  const nativeFocus = vdxrQuad;
+  field(c,'vdxrFocusWidth','Horizontal FOV','The focus area’s share of the view’s width.','number',[25,100,1],nativeFocus,'%');
+  field(c,'vdxrFocusHeight','Vertical FOV','The focus area’s share of the view’s height.','number',[25,100,1],nativeFocus,'%');
+  field(c,'vdxrFocusCustomBlend','Custom edge blending','Adjust the corner radius and feather of the focus area.','toggle',null,nativeFocus);
+  field(c,'vdxrFocusFeather','Focus edge blending','How softly the focus area fades into the periphery.','number',[0,50,1],p => nativeFocus(p) && p.vdxrFocusCustomBlend,'%');
+  field(c,'vdxrFocusCornerRadius','Corner radius','How round the corners of the focus area are.','number',[0,50,1],p => nativeFocus(p) && p.vdxrFocusCustomBlend,'%');
+  field(c,'vdxrFocusMatchColor','Match periphery color','Adjust the peripheral colors to reduce the seam.','toggle',null,nativeFocus);
+  const quadPreview = card('vdxrFocusPreviewCard','Focus preview','Configured resolution per eye at launch.');
+  quadPreview.insertAdjacentHTML('beforeend','<div id="vdxrFocusPreview"></div>');
+  c = card('vdxrStereoControls','Stereo alignment','Match the focus boundaries between eyes.');
+  field(c,'vdxrFocusMatchStereo','Match stereo borders','Align the focus boundaries between eyes.','toggle',null,nativeFocus);
+  field(c,'vdxrFocusReferenceDistance','Reference distance','The distance at which the focus boundaries align.','number',[.25,10,.05],p => nativeFocus(p) && p.vdxrFocusMatchStereo,'m');
   c = card('sharpnessControls','Sharpness','Detail in and around the focus area. Almost no GPU cost.');
   field(c,'quadSharpening','Focus sharpening','Extra sharpening inside the focus area. 0 is off.','number',[0,1,.01],quad,'ratio');
   field(c,'quadSharpenTaper','Sharpening fades at the edge',['Fades the sharpening toward the focus edge, so the edge is harder to see.','Detail steps down gradually. Almost no GPU cost.'],'toggle',null,quad);
   field(c,'quadPeripheryContrast','Periphery contrast',['Makes the periphery look less blurry. 0 is off.','Brings back the local contrast the periphery loses at its lower resolution. Almost no GPU cost. Raise it slowly: too much makes the periphery shimmer (Periphery stability calms that).'],'number',[0,1,.05],quad,'ratio');
   // DLSS page: DLSS 5 (on/off, runtime file, the dxgi switch) and its image, then DCS's DLSS presets, then Foveated Super
   // Resolution (stereo only) with the focus area it uses without Quad Views.
+  c = card('desktopDlssControls','DLSS 5',['Neural rendering processes the monitor image.','Changes to these controls in the in-game menu last until the next launch; other advanced menu settings are preserved.']);
+  field(c,'optiScalerNeuralRendering','Use DLSS 5','Runs DLSS 5 on the monitor image.','toggle',null,desktopEnhanced,'',null,screenMapping('neuralRendering'));
+  segmented(field(c,'optiScalerModelStyle','Model style','The look of the NR model.','select',[['Standard','Standard · default'],['Natural','Natural'],['Cinematic','Cinematic']],p => desktopEnhanced(p) && screenSettings(p).neuralRendering,'',null,screenMapping('modelStyle')),{Standard:'Standard',Natural:'Natural',Cinematic:'Cinematic'});
+  field(c,'optiScalerWorkingScale','Working scale','Resolution scale used by NR. Lower values reduce GPU work and image detail.','number',[.25,1,.01],p => desktopEnhanced(p) && screenSettings(p).neuralRendering,'×',null,screenMapping('workingScale'));
+  field(c,'optiScalerNeuralBeforeUpscaling','Process at render resolution','On: process before DLSS upscaling. Off: process at output resolution.','toggle',null,p => desktopEnhanced(p) && screenSettings(p).neuralRendering,'',null,screenMapping('neuralBeforeUpscaling'));
+  field(c,'optiScalerIntensity','Intensity','Strength of the neural rendering effect.','number',[0,2,.01],p => desktopEnhanced(p) && screenSettings(p).neuralRendering,'×',null,screenMapping('intensity'));
+  const screenNr = p => desktopEnhanced(p) && screenSettings(p).neuralRendering;
+  { const column = document.createElement('div'); column.id = 'desktopNeuralLeft'; $('desktopNeuralControls').append(column);
+    const right = document.createElement('div'); right.id = 'desktopNeuralRight'; $('desktopNeuralControls').append(right); }
+  more = card('desktopNeuralLeft','Structure & appearance','Defaults: 1×, automatic mask on.');
+  field(more,'optiScalerLocalToneStrength','Local tone','Local contrast response.','number',[0,2,.01],screenNr,'×',null,screenMapping('localToneStrength'));
+  field(more,'optiScalerLocalStructureStrength','Local structure','Fine-detail reconstruction.','number',[0,2,.01],screenNr,'×',null,screenMapping('localStructureStrength'));
+  field(more,'optiScalerSkinStructureStrength','Skin structure','Detail on skin, using the model mask.','number',[0,2,.01],screenNr,'×',null,screenMapping('skinStructureStrength'));
+  field(more,'optiScalerAutomaticMask','Automatic mask','Let the model mask regions automatically.','toggle',null,screenNr,'',null,screenMapping('automaticMask'));
+  more = card('desktopNeuralRight','Color & transfer','Defaults: 1×.');
+  field(more,'optiScalerColourStrength','Color strength','Color reconstruction strength.','number',[0,2,.01],screenNr,'×',null,screenMapping('colourStrength'));
+  field(more,'optiScalerTransferStrength','Transfer strength','Transfer response strength.','number',[0,2,.01],screenNr,'×',null,screenMapping('transferStrength'));
+  field(more,'optiScalerPaperWhiteScale','Paper white scale','White-level multiplier.','number',[.25,8,.01],screenNr,'×',null,screenMapping('paperWhiteScale'));
+  more = card('desktopNeuralRight','Depth & motion guides','Depth flags shared by neural rendering and super resolution, applied at launch.');
+  segmented(field(more,'optiScalerDepthConvention','Depth convention','Follow the game or force a convention for NR and SR at launch.','select',[['Game','Follow the game · default'],['Normal','Normal depth'],['Reversed','Reversed depth']],desktopEnhanced,'',null,screenMapping('depthConvention')),{Game:'Game',Normal:'Normal',Reversed:'Reversed'});
+  foldValues.push({box:$('desktopNeuralAdvanced'),value:p => {
+    const s = screenSettings(p), n = ['localToneStrength','localStructureStrength','skinStructureStrength','colourStrength','transferStrength','paperWhiteScale'].filter(key => Number(s[key]) !== 1).length + (s.automaticMask ? 0 : 1) + (s.depthConvention !== 'Game' ? 1 : 0);
+    return n ? `${n} changed` : 'All at defaults';
+  }});
+  c = card('desktopCompressionControls','Peripheral compression','Keep the center at full density and compress the image around it for NR.');
+  field(c,'optiScalerPeripheralCompression','Peripheral compression','Apply spatial compression before the NR model pass.','toggle',null,p => desktopEnhanced(p) && screenSettings(p).neuralRendering,'',null,screenMapping('peripheralCompression'));
+  const compressionOn = p => desktopEnhanced(p) && screenSettings(p).neuralRendering && screenSettings(p).peripheralCompression;
+  field(c,'optiScalerCenterWidth','Center width','Width of the full-density center.','number',[25,100,.1],compressionOn,'%',null,screenMapping('centerWidth'));
+  field(c,'optiScalerCenterHeight','Center height','Height of the full-density center.','number',[25,100,.1],compressionOn,'%',null,screenMapping('centerHeight'));
+  field(c,'optiScalerPeripheralRetention','Peripheral retention','Share of the remaining width and height allocated to the periphery. Higher retains more peripheral detail.','number',[1,100,.1],compressionOn,'%',null,screenMapping('peripheralRetention'));
+  { const preview = document.createElement('div'); preview.id = 'desktopCompressionPreview'; preview.className = 'spatial-mini'; c.append(preview); }
+  c = card('desktopSrControls','Super resolution','DLSS reconstructs the monitor image. These settings are separate from the VR profile.');
+  field(c,'optiScalerSuperResolution','Super resolution','On: render at a lower resolution and upscale. Off: use native-resolution anti-aliasing; the DLSS input remains available for NR.','toggle',null,desktopEnhanced,'',null,screenMapping('superResolution'));
+  field(c,'optiScalerQuality','Quality','Controls input resolution. Quality preserves more detail; Performance reduces GPU work.','select',[['Quality','Quality'],['Balanced','Balanced'],['Performance','Performance'],['UltraPerformance','Ultra Performance']],p => desktopEnhanced(p) && screenSettings(p).superResolution,'',null,screenMapping('quality'));
+  field(c,'optiScalerPreset','DLSS preset','The DLSS model used for monitor output. Same as DCS follows the game; K, L and M are sharper and cost a little more.','select',[[0,'Same as DCS · default'],[11,'K'],[12,'L'],[13,'M'],[5,'E']],desktopEnhanced,'',null,screenMapping('preset'));
+  field(c,'hudAfterDlss','HUD and MFDs after DLSS','Draw the HUD and MFDs after DLSS to keep their text sharp.','toggle',null,null,'',null,{prop:'hudAfterDlss',get:p => p.hudAfterDlss ?? state?.inventory?.autoexecHudAfterDlss === true,set:(p,value) => { p.hudAfterDlss = value; }});
+  c = card('desktopFramegenControls','Frame generation','DLSS adds frames between the ones DCS renders.');
+  field(c,'optiScalerFrameGeneration','Frame generation','Enable DLSS frame generation for monitor output.','toggle',null,desktopEnhanced,'',null,screenMapping('frameGeneration'));
+  { const note = document.createElement('p'); note.id = 'desktopFgHardware'; note.className = 'fine'; c.append(note); }
+  segmented(field(c,'optiScalerFrameGenerationFactor','Generated frames',['Select Auto or a fixed output multiplier supported by the GPU and runtime.','Note: Auto increases the multiplier only when native FPS falls short.'],'select',[[0,'Auto'],[2,'2×'],[3,'3×'],[4,'4×'],[5,'5×'],[6,'6×']],p => desktopEnhanced(p) && screenSettings(p).frameGeneration,'',null,{prop:'optiScaler',get:p => screenSettings(p).dynamicFrameGeneration ? 0 : screenSettings(p).frameGenerationFactor,set:(p,value) => { p.optiScaler = {...screenSettings(p),dynamicFrameGeneration:Number(value) === 0,...(Number(value) === 0 ? {} : {frameGenerationFactor:Number(value)})}; }}),{0:'Auto',2:'2×',3:'3×',4:'4×',5:'5×',6:'6×'});
+  c = card('desktopPacingControls','Target frame rate','Limit the displayed frame rate, including generated frames.');
+  segmented(field(c,'optiScalerOutputFrameLimit','Frame limit',['Keep the current output limit, match the display refresh rate, or set a custom limit.','Note: Fixed multipliers reduce the native frame rate needed for this target.'],'select',[['Preserve','Keep the current output limit'],['MatchRefresh','Match refresh'],['Custom','Custom limit']],desktopEnhanced,'',null,{prop:'optiScaler',get:p => screenSettings(p).outputFrameLimit,set:(p,value) => { p.optiScaler = {...screenSettings(p),outputFrameLimit:value,...(value === 'Custom' ? {frameRateTarget:screenSettings(p).frameRateTarget || 120} : {})}; }}),{Preserve:'Keep',MatchRefresh:'Match refresh',Custom:'Custom'});
+  field(c,'optiScalerFrameRateTarget','Custom limit','The displayed frame-rate limit, including generated frames.','number',[30,1000,1],p => desktopEnhanced(p) && screenSettings(p).outputFrameLimit === 'Custom','FPS',p => screenSettings(p).outputFrameLimit !== 'Custom',screenMapping('frameRateTarget'));
+  segmented(field(c,'optiScalerFrameLimit','DCS native frame limit','Keep DCS\'s current limit, match the selected display refresh rate, or apply a custom native limit.','select',[['Preserve','Keep the current DCS limit'],['MatchRefresh','Match refresh'],['Custom','Custom limit']],desktopEnhanced,'',null,{prop:'optiScaler',get:p => screenSettings(p).matchDisplayRefresh ? 'MatchRefresh' : screenSettings(p).renderedFpsCap > 0 ? 'Custom' : 'Preserve',set:(p,value) => { p.optiScaler = {...screenSettings(p),matchDisplayRefresh:value === 'MatchRefresh',renderedFpsCap:value === 'Custom' ? screenSettings(p).renderedFpsCap || 120 : 0}; }}),{Preserve:'Keep',MatchRefresh:'Match refresh',Custom:'Custom'});
+  field(c,'optiScalerRenderedFpsCap','Custom native limit','The maxFPS value applied to DCS at launch.','number',[30,300,1],p => desktopEnhanced(p) && !screenSettings(p).matchDisplayRefresh && screenSettings(p).renderedFpsCap > 0,'FPS',p => screenSettings(p).renderedFpsCap === 0,screenMapping('renderedFpsCap'));
+  segmented(field(c,'optiScalerVSync','VSync',['Keep the game setting or override vertical synchronization.','Note: VSync affects frame-generation pacing.'],'select',[['Game','Keep'],['On','On'],['Off','Off']],desktopEnhanced,'',null,{prop:'optiScaler',get:p => screenSettings(p).vSync == null ? 'Game' : screenSettings(p).vSync ? 'On' : 'Off',set:(p,value) => { p.optiScaler = {...screenSettings(p),vSync:value === 'Game' ? null : value === 'On'}; }}),{Game:'Keep',On:'On',Off:'Off'});
+  more = disclosure(c,'Diagnostics','FPS counter and runtime logging.',p => `${[screenSettings(p).showFps,screenSettings(p).logToFile].filter(Boolean).length} of 2 on`);
+  toggles = toggleList(more);
+  field(toggles,'optiScalerShowFps','FPS counter','Show the FPS counter in Simple mode.','toggle',null,desktopEnhanced,'',null,screenMapping('showFps'));
+  field(toggles,'optiScalerLogToFile','Write log','Save rendering diagnostics to a log file.','toggle',null,desktopEnhanced,'',null,screenMapping('logToFile'));
   c = card('dlssControls','DLSS 5','NVIDIA\'s neural rendering. Its runtime file is not included: you provide it.');
   field(c,'neuralRendering','Use DLSS 5','Runs DLSS 5 on the image. With Quad Views, only on the focus area.','toggle');
-  field(c,'neuralRuntimePath','Runtime file',['NVIDIA\'s nvngx_dlssnr.dll, 310.8 or 310.9. Select it once.','310.9 is NVIDIA\'s newer, faster model; 310.8 is the one tested most. On RTX 20, 30 and 40 cards, NVIDIA\'s file patched for them works too. DCS Control keeps a verified copy and uses it while this field is empty.'],'path',null,nr);
+  const runtimeDetails = disclosure(c,'Runtime file','NVIDIA nvngx_dlssnr.dll shared by the rendering profiles.'); runtimeDetails.id = 'nrRuntimeDetails';
+  field(runtimeDetails,'neuralRuntimePath','Runtime file',['NVIDIA\'s nvngx_dlssnr.dll, 310.8 or 310.9. Select it once.','310.9 is NVIDIA\'s newer, faster model; 310.8 is the one tested most. On RTX 20, 30 and 40 cards, NVIDIA\'s file patched for them works too. DCS Control keeps a verified copy and uses it while this field is empty.'],'path',null,rendererNr);
   const savedBox = document.createElement('div'); savedBox.id = 'savedRuntime'; savedBox.className = 'saved-runtime'; savedBox.hidden = true; $('setting-neuralRuntimePath').append(savedBox);
-  field(c,'keepOtherDxgi','Keep another program\'s dxgi.dll working',['For ReShade or an overlay with its own dxgi.dll in DCS.','On: it keeps working with DLSS 5. Off: it is set aside while you fly. Back to stock DCS puts it back.'],'toggle',null,p => Boolean(p.neuralRendering || p.foveatedDlss));
+  field(c,'vdxrJointNr','Extend NR to peripheral views','Process focus and periphery together with Quad Views and pre-SR NR. Applies at launch.','toggle',null,p => nativeFocus(p) && p.neuralRendering,'',p => !vdxrVr(p));
+  field(c,'vdxrNrFocusStability','Focus-guided stability','Reduces slight brightness flicker in the periphery. Fast head turns can leave trails along the edges. Applies at launch.','toggle',null,
+    p => nativeFocus(p) && p.neuralRendering && p.neuralBeforeUpscaling && p.vdxrJointNr,'',p => !vdxrVr(p));
   // Area first (the biggest GPU cost), then resolution, then the look.
-  c = card('dlssProcessing','DLSS 5 image','Area and working scale set the GPU cost; intensity and style the look.');
-  field(c,'neuralFocusArea','DLSS 5 area',['How much of the focus area DLSS 5 processes.','Around it the image is normal DLSS. Times are GPU time for both eyes, measured on an RTX 5090 (1764×2480 per eye, full working scale).'],'select',[[100,'Whole focus area · 10.8 ms · default'],[90,'Central 90% · about 9.3 ms (estimated)'],[80,'Central 80% · 7.9 ms'],[70,'Central 70% · 6.4 ms'],[50,'Central 50% · 4.8 ms']],p => nr(p) && p.quadViews === 'QuadViewsFoveated' && p.quadFocusAdapter);
-  field(c,'quadNeuralEdgeFade','DLSS 5 fades at the focus edge',['The DLSS 5 look fades toward the focus edge, so it does not stand out. No GPU cost.','Tone, color and detail fade out toward the edge of the focus area.'],'toggle',null,p => nr(p) && p.quadViews === 'QuadViewsFoveated' && p.quadFocusAdapter && p.neuralFocusArea >= 100 && effectiveFovea(p).blend > 0);
+  c = card('dlssProcessing','DLSS 5 image','Working scale sets the GPU cost. Intensity and style control the look.');
+  field(c,'neuralFocusArea','DLSS 5 area',['How much of the focus area DLSS 5 processes.','Around it the image is normal DLSS. Times are GPU time for both eyes, measured on an RTX 5090 (1764×2480 per eye, full working scale).'],'select',[[100,'Whole focus area · 10.8 ms · default'],[90,'Central 90% · about 9.3 ms (estimated)'],[80,'Central 80% · 7.9 ms'],[70,'Central 70% · 6.4 ms'],[50,'Central 50% · 4.8 ms']],p => nr(p) && p.quadViews === 'QuadViewsFoveated' && p.quadFocusAdapter,'',vdxrVr);
+  field(c,'quadNeuralEdgeFade','DLSS 5 fades at the focus edge',['The DLSS 5 look fades toward the focus edge, so it does not stand out. No GPU cost.','Tone, color and detail fade out toward the edge of the focus area.'],'toggle',null,p => nr(p) && p.quadViews === 'QuadViewsFoveated' && p.quadFocusAdapter && p.neuralFocusArea >= 100 && effectiveFovea(p).blend > 0,'',vdxrVr);
   field(c,'neuralWorkingScale','Working scale','The resolution DLSS 5 works at. Lower costs less GPU and gives less detail.','number',[.1,1,.01],nr,'ratio');
   field(c,'neuralBeforeUpscaling','Process at render resolution','On: faster, before DLSS upscaling. Off: at output resolution, more detail, more GPU.','toggle',null,nr);
   field(c,'neuralIntensity','Intensity','How strongly the DLSS 5 image is blended in. Default 1.','number',[0,1,.01],nr,'ratio');
+  field(c,'vdxrNrPreset','DLSS-NR Preset','Choose the DLSS-NR model.','select',[[0,'Default'],[1,'Preset A · Original'],[2,'Preset B · Faster']],nr,'',p => !vdxrVr(p));
   segmented(field(c,'neuralStyle','Model style','The look of the DLSS 5 model.','select',[['Standard','Standard · default'],['Natural','Natural'],['Cinematic','Cinematic']],nr),{Standard:'Standard',Natural:'Natural',Cinematic:'Cinematic'});
   // The DLSS model DCS upscales with: the focus area first, then around it.
+  c = card('vdxrNrAdaptiveControls','Adaptive quality','Reduce the NR working scale or skip NR under sustained load.');
+  const adaptiveNr = p => nativeFocus(p) && p.neuralRendering && p.neuralBeforeUpscaling;
+  field(c,'vdxrAutomaticNr','Auto scale NR','Uses Optiflow timing and pre-SR processing.','toggle',null,adaptiveNr);
+  field(c,'vdxrNrThreshold','NR FPS threshold','Percentage of the target output FPS.','number',[50,90,1],p => adaptiveNr(p) && p.vdxrAutomaticNr,'%');
   c = card('dlssPresets','DLSS presets','The DLSS model DCS upscales with, for the focus area and around it.');
   field(c,'focusDlssPreset','Focus DLSS preset','The DLSS model for the focus area. K, L and M are sharper and cost a little more.','select',[[0,'Same as DCS · default'],[11,'K'],[12,'L'],[13,'M'],[5,'E']],p => ((nr(p) || p.foveatedDlss) && p.quadViews === 'QuadViewsFoveated' && p.quadFocusAdapter) || usesPeripheryDlssPreset(p));
   // The engine module's per-view preset (VrProfile.UsesPeripheryDlssPreset); ProfileValidation says what it still needs.
@@ -692,13 +932,29 @@ function buildFields() {
   { const ones = ['neuralLocalTone','neuralLocalStructure','neuralSkinStructure','neuralColorStrength','neuralTransferStrength','neuralPaperWhiteScale','neuralMotionScaleX','neuralMotionScaleY'];
     foldValues.push({box:$('neuralAdvanced'),value:p => { const n = ones.filter(k => Number(p[k]) !== 1).length + ['neuralAutomaticMask','neuralUiCorrection'].filter(k => p[k]).length + (p.neuralDepth !== 'Game' ? 1 : 0);
       return n ? `${n} changed` : 'All at defaults'; }}); }
+  c = card('vdxrSrControls','Center Super Resolution','Adjust upscaling in the Quad Views focus area.');
+  field(c,'vdxrCenterSr','Center Super Resolution','Apply the center DLSS settings when Quad Views is enabled.','toggle',null,nativeFocus);
+  const centerSr = p => nativeFocus(p) && p.vdxrCenterSr;
+  field(c,'vdxrCenterPreset','Center DLSS preset','Choose the DLSS model for the focus area.','select',[[0,'Same as DCS'],[11,'K'],[12,'L'],[13,'M'],[5,'E']],centerSr);
+  field(c,'vdxrCenterSupersampling','Center supersampling','Higher values sharpen the focus area and use more GPU time.','number',[1,2,.01],centerSr,'ratio');
+  c = card('vdxrSrAdaptiveControls','Adaptive quality','Uses Optiflow timing to reduce the center supersampling multiplier to 1× under sustained load.');
+  const adaptiveSr = p => centerSr(p) && p.vdxrCenterSupersampling > 1;
+  field(c,'vdxrAutomaticSr','Auto scale SR','Reduce center supersampling when output FPS stays low.','toggle',null,adaptiveSr);
+  field(c,'vdxrSrThreshold','SR FPS threshold','Percentage of the target output FPS.','number',[50,90,1],p => adaptiveSr(p) && p.vdxrAutomaticSr,'%');
   // Frame generation page. Left: how many frames are generated. Right: the DCS frame limit, how generated frames look,
   // then one fold for troubleshooting.
   c = card('framegenControls','Frame generation','Frames added between the ones DCS renders, so the headset gets one at every refresh.');
-  segmented(field(c,'frameGen','Method','NVIDIA Optical Flow needs an RTX card; FidelityFX works on any card.','select',[['Off','Off'],['Nvidia','NVIDIA Optical Flow · RTX cards'],['FidelityFx','FidelityFX Optical Flow · any card']]),{Off:'Off',Nvidia:'NVIDIA',FidelityFx:'FidelityFX'});
-  segmented(field(c,'frameGenFactor','Generated frames',['Auto: frames are generated only as much as DCS needs.','Without Only when needed, DCS renders half the refresh rate, a third while it falls behind. 2× or 3×: fixed, DCS renders half or a third. 3× adds latency and smearing in sideways motion.'],'select',[[0,'Auto · default'],[2,'2× · one generated frame'],[3,'3× · two generated frames']],p => p.frameGen !== 'Off'),{0:'Auto',2:'2×',3:'3×'});
+  segmented(field(c,'frameGen','Method','NVIDIA Optical Flow needs an RTX card; FidelityFX works on any card.','select',[['Off','Off'],['Nvidia','NVIDIA Optical Flow · RTX cards'],['FidelityFx','FidelityFX Optical Flow · any card']],null,'',vdxrVr),{Off:'Off',Nvidia:'NVIDIA',FidelityFx:'FidelityFX'});
+  field(c,'vdxrFrameGenMethod','Method','Requires an NVIDIA RTX card. Depth and Hybrid use guides from DCS DLSS.','select',[['Off','Off'],...Object.entries(vdxrFlowLabels)],null,'',p => !vdxrVr(p),{
+    prop:'frameGen',get:p => p.frameGen === 'Off' ? 'Off' : p.vdxrFrameGenMethod,
+    set:(p,value) => { p.frameGen = value === 'Off' ? 'Off' : 'Nvidia'; if (value !== 'Off') p.vdxrFrameGenMethod = value; }
+  });
+  const hideHybridDepth = p => !vdxrVr(p) || p.frameGen === 'Off' || p.vdxrFrameGenMethod !== 'OptiflowHybrid';
+  field(c,'vdxrFgDepthGuidance','Depth-Guided Reconstruction','Use depth to guide how motion is reconstructed.','toggle',null,null,'',hideHybridDepth);
+  field(c,'vdxrFgDepthSplat','Depth Splat','Use depth to resolve which surfaces appear in generated frames.','toggle',null,null,'',hideHybridDepth);
+  segmented(field(c,'frameGenFactor','Generated frames',['Auto: frames are generated only as much as DCS needs.','Without Only when needed, DCS renders half the refresh rate, a third while it falls behind. 2× or 3×: fixed, DCS renders half or a third. 3× adds latency and smearing in sideways motion.'],'select',[[0,'Auto · default'],[2,'2× · one generated frame'],[3,'3× · two generated frames'],[4,'4× · three generated frames']],p => p.frameGen !== 'Off'),{0:'Auto',2:'2×',3:'3×',4:'4×'});
   field(c,'frameGenAdaptiveCadence','Only when needed',['Frames are generated only while DCS falls behind: lower latency. Needs Generated frames on Auto; with Keep, the frame limit is set to the refresh rate for you.','DCS renders the full refresh rate, so latency is lower whenever DCS keeps up.'],'toggle',null,p => p.frameGen !== 'Off' && p.frameGenFactor === 0);
-  segmented(field(c,'frameGenPassThrough','Stop generating',['When DCS\'s own frames go straight to the headset. Applies at the next DCS start.','Steady: only with plenty of room, rarely on a PC that just holds the refresh rate. Balanced: when DCS looks able to hold the refresh rate, as long as frames arrive on time. Prefer refresh rate: tries whenever it might hold, and generates again only when frames come late. A try that fails is not repeated for a while, and after a few failed tries not until the next mission or a few clean minutes.'],'select',[['Steady','Steady'],['Balanced','Balanced · default'],['PreferRefresh','Prefer refresh rate']],p => usesAdaptiveCadence(p)),{Steady:'Steady',Balanced:'Balanced',PreferRefresh:'Prefer refresh rate'});
+  segmented(field(c,'frameGenPassThrough','Stop generating',['When DCS\'s own frames go straight to the headset. Applies at the next DCS start.','Steady: only with plenty of room, rarely on a PC that just holds the refresh rate. Balanced: when DCS looks able to hold the refresh rate, as long as frames arrive on time. Prefer refresh rate: tries whenever it might hold, and generates again only when frames come late. A try that fails is not repeated for a while, and after a few failed tries not until the next mission or a few clean minutes.'],'select',[['Steady','Steady'],['Balanced','Balanced · default'],['PreferRefresh','Prefer refresh rate']],p => usesAdaptiveCadence(p),'',vdxrVr),{Steady:'Steady',Balanced:'Balanced',PreferRefresh:'Prefer refresh rate'});
   field(c,'frameGenDeepPipeline','Smoothness buffer',['Smoother with uneven DCS frame times, with a little more latency.','Holds one extra frame: about 11 ms more latency at 90 Hz while frames are generated. In 3× it holds it only while frames keep arriving late.'],'toggle',null,p => p.frameGen !== 'Off');
   // frameGenPipelinedDeepHold has no control: it follows the Smoothness buffer (on with it, off without it) and stays in
   // the profile file only (ConfigurationWriters.Ofxr writes pipelined_deep_hold only with frameGenDeepPipeline).
@@ -711,6 +967,7 @@ function buildFields() {
   field(c,'headsetRefreshHz','Headset refresh rate','Used when the refresh rate is not read from the headset, or before the headset software has reported one.','number',[50,240,.5],p => !p.refreshFromHeadset || !state?.headsetRefresh,'Hz');
   field(c,'disableDcsVSync','Desktop VSync off','Stops the monitor\'s VSync holding back the frame rate. The headset keeps its own sync.','toggle');
   c = card('pacingControls','Image quality','How generated frames look.');
+  c.dataset.ofxrOnly = 'true';
   // Greyed out until Depth boost runs, but never while it is on (ProfileValidation's hud-symbology-needs says why), so it can be turned off.
   field(c,'frameGenHudSymbology','<span class="tag">EXPERIMENTAL</span> Sharp HUD',['Stops HUD and helmet symbols smearing in generated frames. Needs Depth boost.','They update at DCS\'s own HUD rate (about 20 times a second). Costs about 0.15 ms of GPU and 160 MB of video memory.'],'toggle',null,p => p.frameGen !== 'Off' && (usesDepthBoost(p) || p.frameGenHudSymbology));
   field(c,'smoothCursor','Smooth mouse cursor',['The mouse cursor moves smoothly in generated frames.','It is drawn at its in-between position. Where you click doesn\'t change.'],'toggle',null,p => p.frameGen !== 'Off');
@@ -721,7 +978,7 @@ function buildFields() {
   field(c,'bidirectionalFlow','Bidirectional flow','Estimates motion forwards and backwards. Costs more GPU.','toggle',null,flow,'',fidelity);
   more = disclosure(c,'Diagnostics','Keep the defaults unless you are tracking down a problem.',p => `${['showOverlay','diagnosticRecorder','diagnosticFrameRecords','frameGenAsyncArm'].filter(k => p[k]).length} of 4 on`);
   toggles = toggleList(more);
-  field(toggles,'showOverlay','FPS counter',['Frame generation\'s own FPS counter, always visible.','The headset panel (Keys & headset panel page) also shows FPS and can be hidden in flight.'],'toggle',null,p => p.frameGen !== 'Off');
+  field(toggles,'showOverlay','FPS counter',['Frame generation\'s own FPS counter, always visible.','The headset panel (In Flight page) also shows FPS and can be hidden in flight.'],'toggle',null,p => p.frameGen !== 'Off');
   field(toggles,'diagnosticRecorder','Frame generation log','Writes the frame generation log while you fly, for troubleshooting.','toggle',null,p => p.frameGen !== 'Off');
   field(toggles,'diagnosticFrameRecords','Per-frame records','A line per frame in the log, to find stutters. The log can grow to 1 GB.','toggle',null,p => p.frameGen !== 'Off' && p.diagnosticRecorder);
   field(toggles,'frameGenAsyncArm','Prepare in the background',['Gets ready on another thread when a new view starts.','For example leaving the F10 map; frames pass through meanwhile.'],'toggle',null,p => p.frameGen !== 'Off');
@@ -742,15 +999,16 @@ function buildFields() {
   field(c,'freeVramReopen','Reopen after the flight','Starts the closed programs again, as your user, when DCS exits.','toggle',null,vram);
   field(c,'freeVramForce','End programs that do not close','Ends a program that ignores the close request after 5 s; unsaved work in it is lost. Off: it keeps running.','toggle',null,vram);
   field(c,'pauseTobiiDesktop','Pause the desktop Tobii eye tracker',['Stops a desktop Tobii taking over the headset\'s eye tracking.','For a desktop Tobii (Eye Tracker 5 or 4C) next to a Pimax Crystal: it is paused while DCS runs. Asks for administrator rights.'],'toggle',null,p => !p.desktop,'',p => p.desktop);
-  field(c,'smallDcsWindow','Small DCS window in VR',['A 1280×720 window on the monitor saves some VRAM and GPU time.','Windowed. The headset image does not change. Back to stock DCS puts your window settings back.'],'toggle',null,p => !p.desktop,'',p => p.desktop);
+  field(c,'smallDcsWindow','Small DCS window in VR','A 1280×720 window on the monitor saves some VRAM and GPU time.','toggle',null,p => !p.desktop,'',p => p.desktop);
   field(c,'lowerMonitor','Lower the monitor while flying',['Switches the monitor to the mode below while DCS runs.','It switches back when DCS exits. It is never saved as a Windows setting, so a restart also brings your mode back. HDR is left as it is.'],'toggle',null,p => !p.desktop,'',p => p.desktop);
   field(c,'flightDisplayMode','Monitor mode in flight','Modes your main monitor reports. 1920×1080 at 60 Hz suits most setups.','select',[[displayModeKey(profileDefaults),displayModeLabel(profileDefaults)]],p => p.lowerMonitor && !p.desktop,'',p => p.desktop,
     {prop:'flightDisplayMode',get:p => displayModeKey(p),set:(p,v) => { const [w,h,hz] = v.split(/[x@]/).map(Number); p.flightDisplayWidth = w; p.flightDisplayHeight = h; p.flightDisplayRefresh = hz; }});
   // Engine Optimizations page: the DcsQvCull module, installed in Saved Games with the profile.
   const engine = p => p.engineOptimizations;
-  c = card('engineControls','Engine Optimizations',['More FPS from the same CPU; the image does not change.','About 50 to 60% more FPS on a busy airfield in VR, until the GPU is the limit.']);
+  c = card('engineControls','Engine Optimizations',['More FPS by reducing CPU work inside DCS.','About 50 to 60% more FPS on a busy airfield in VR, until the GPU is the limit.']);
   field(c,'engineOptimizations','Turn on',['Stays on whenever DCS starts, until you turn it off here.','Also from Steam or a shortcut; Back to stock DCS turns it off too. Nothing in the DCS folder changes. Tested on DCS 2.9.30, single player.'],'toggle');
-  field(c,'engineReleaseIdleDlss','Free unused DLSS memory',['Frees the unused DLSS copy each mission load leaves (0.7–1.4 GB).','Helps long sessions with many restarts. The image doesn\'t change. On by default.'],'toggle',null,engine);
+  field(c,'engineReleaseIdleDlss','Free unused DLSS memory','Releases idle native DLSS instances after a mission loads.','toggle',null,engine,'',
+    p => desktopEnhanced(p) || (vdxrVr(p) && (vdxrQuad(p) || p.neuralRendering || p.frameGen !== 'Off')));
   field(c,'engineShadowCache','<span class="tag">EXPERIMENTAL</span> Cache distant shadows',['About 0.7 ms less GPU time; distant tree shadows sway less smoothly.','Reuses the distant shadows (about 70 m to 1.5 km) for a few frames. Off by default.'],'toggle',null,engine);
   // [Model] RecordersEmulatedLists: only where it can matter (EngineOptimizations.ShowsEmulatedListsOption): an AMD-only
   // PC, a module log with DriverCommandLists=0, or already on. Read when DCS starts, so not live.
@@ -788,12 +1046,37 @@ function buildFields() {
   c = card('gameControls','DCS','Detected automatically; change only if DCS is somewhere else.');
   field(c,'dcs','DCS executable','DCS.exe in the bin folder of your installation.','path');
   field(c,'options','DCS settings file','options.lua in Saved Games\\DCS\\Config.','path');
-  field(c,'keepDcsLauncher','Show the DCS launcher',['On: the DCS launcher opens first. Off: straight into the game.','With the launcher, press Play there. Back to stock DCS turns the launcher back on.'],'toggle');
+  field(c,'keepDcsLauncher','Show the DCS launcher',['On: the DCS launcher opens first. Off: straight into the game.','With the launcher, press Play there.'],'toggle');
+  field(c,'keepOtherDxgi','Keep another program\'s dxgi.dll working',['For ReShade or an overlay with its own dxgi.dll in DCS.','On: it loads together with the selected rendering backend. Off: it is set aside while you fly.'],'toggle',null,p => p.desktop ? Boolean(p.desktopEnhanced) : Boolean(p.neuralRendering || p.foveatedDlss));
+  c = card('desktopOutputControls','Display output','Choose the resolution DCS uses for monitor rendering. Launch DCS applies the selected output dimensions.');
+  field(c,'optiScalerOutputDisplay','Display','Display used to list available output resolutions.','select',[['','Primary display']],desktopEnhanced,'',null,{prop:'optiScaler',get:p => screenSettings(p).outputDisplay,set:(p,value) => { p.optiScaler = {...screenSettings(p),outputDisplay:value}; }});
+  field(c,'optiScalerOutputResolution','Output resolution','Follow DCS, choose a listed resolution, or enter a custom output size.','select',[['follow','Follow DCS'],['custom','Custom']],desktopEnhanced,'',null,{prop:'optiScaler',get:outputResolutionChoice,set:(p,value) => {
+    customOutputResolution = value === 'custom';
+    const s = screenSettings(p);
+    if (value === 'follow') p.optiScaler = {...s,overrideResolution:false};
+    else if (value === 'custom') p.optiScaler = {...s,overrideResolution:true};
+    else { const [width,height] = value.split('x').map(Number); p.optiScaler = {...s,overrideResolution:true,outputWidth:width,outputHeight:height}; }
+  }});
+  const customOutput = p => desktopEnhanced(p) && outputResolutionChoice(p) === 'custom';
+  field(c,'optiScalerOutputWidth','Output width','DCS output width applied at launch.','number',[640,15360,1],customOutput,'px',p => !customOutput(p),screenMapping('outputWidth'));
+  field(c,'optiScalerOutputHeight','Output height','DCS output height applied at launch.','number',[480,8640,1],customOutput,'px',p => !customOutput(p),screenMapping('outputHeight'));
   // Pupil shift (native/pupil_shift): an OpenXR layer first in the chain; it needs the gaze of eye-tracked Quad Views.
+  const headOffset = p => nativeFocus(p) && p.vdxrFocusHeadOffset;
+  c = card('headOffsetControls','Head angle offset','Set the recenter shortcut in the in-game F8 menu.');
+  field(c,'vdxrFocusHeadOffset','Head angle offset','Move the focus area as you turn your head.','toggle',null,nativeFocus);
+  c = card('headFocusPreviewCard','Focus preview','Fixed offset at the recentered pose · 90° reference view.');
+  c.insertAdjacentHTML('beforeend','<div id="headFocusPreview"></div>');
+  for (const axis of ['Horizontal','Vertical']) {
+    const prefix = 'vdxrFocus'+axis;
+    c = card('head'+axis+'Controls',axis+' offset');
+    field(c,prefix+'Bias','Fixed offset','Shift the focus area at the centered head angle. The outer view limits the shift.','number',[-vdxrFocusMaxBias,vdxrFocusMaxBias,.1],headOffset,'°');
+    field(c,prefix+'Deadzone','Angle dead zone','Ignore head rotation inside this angle.','number',[0,10,.1],headOffset,'°');
+    field(c,prefix+'AngleGain','Angle gain','Scale the focus offset as head angle changes.','number',[-1,1,.01],headOffset,'ratio');
+  }
   const pupil = p => p.pupilShift;
   // Perception page: the eye distance DCS renders with first, since Pupil shift and Depth boost build on it.
   c = card('eyeControls','Eye distance','Sets the size and depth of the world.');
-  segmented(field(c,'eyeDistance','Eye distance',['The headset\'s own value gives the world its true size and depth. DCS\'s custom IPD changes the size of everything.','Measured, or set in Pimax Play or SteamVR. Leave DCS\'s custom IPD off unless you have a reason. Back to stock DCS restores DCS\'s own setting.'],'select',[['Headset','The headset\'s own (recommended)'],['DcsCustom','DCS\'s custom IPD (as set in DCS)'],['Manual','Set here']],p => !p.desktop),{Headset:'Headset\'s own',DcsCustom:'DCS custom IPD',Manual:'Set here'});
+  segmented(field(c,'eyeDistance','Eye distance',['The headset\'s own value gives the world its true size and depth. DCS\'s custom IPD changes the size of everything.','The headset or VR runtime supplies the default eye distance.'],'select',[['Headset','The headset\'s own (recommended)'],['DcsCustom','DCS\'s custom IPD (as set in DCS)'],['Manual','Set here']],p => !p.desktop),{Headset:'Headset\'s own',DcsCustom:'DCS custom IPD',Manual:'Set here'});
   field(c,'eyeDistanceMm','Eye distance value','Used when Eye distance is Set here.','number',[50,80,.5],p => !p.desktop && p.eyeDistance === 'Manual','mm');
   { const ipd = document.createElement('p'); ipd.className = 'pimax-note card-note'; ipd.id = 'pupilIpd'; ipd.hidden = true; c.append(ipd); }
   c = card('pupilControls','<span class="tag">EXPERIMENTAL</span> Pupil shift',['Each eye is rendered from where its pupil is, so the cockpit stays still when only your eyes move.','Your pupils move a little when your eyes turn. If the cockpit seems to move, turn it off.']);
@@ -804,7 +1087,7 @@ function buildFields() {
   field(more,'pupilShiftVirtualImageM','Lens image distance','How far away the lens shows the image. 1 to 2 m is typical; it barely matters.','number',[.5,5,.1],pupil,'m');
   // Periphery stability (native/quadviews/dcsvr_perception.h): a pass in the bundled Quad Views, fixed or eye-tracked focus.
   const stability = p => p.peripheryStability;
-  c = card('stabilityControls','<span class="tag">EXPERIMENTAL</span> Periphery stability',['Calms shimmering thin lines around the focus area. Bundled Quad Views only.','Canopy frames, power lines and the horizon. The focus area itself is not touched.']);
+  c = card('stabilityControls','<span class="tag">EXPERIMENTAL</span> Periphery stability',['Calms shimmering thin lines around the focus area. Bundled Quad Views only.','Applies to canopy frames, power lines and the horizon in the periphery.']);
   field(c,'peripheryStability','Periphery stability','Steadies the periphery from frame to frame. Almost no GPU cost.','toggle');
   field(c,'peripheryStabilityStrength','Strength','Higher is steadier; 0.5 is a good start. Moving scenery can leave a faint trail.','number',[0,1,.05],stability,'ratio');
   // Depth boost (same layer, its own switch): the render IPD rises while you look far and returns in the cockpit.
@@ -830,9 +1113,9 @@ function buildFields() {
   // Visual realism page: the engine module's color modes and [VrFx] effects (installed for them alone too, in its
   // Perception-only mode). Main controls in the cards, the rest in Advanced folds.
   const vrOnly = p => !p.desktop;
-  c = card('colorControls','Color','How DCS looks in the headset. Its key (Keys & headset panel page) switches modes in flight.');
+  c = card('colorControls','Color','How DCS looks in the headset. Its key (In Flight page) switches modes in flight.');
   segmented(field(c,'colorMode','Color mode','Off is DCS\'s own image. Fix: true blacks and both eyes equally bright (0.05 ms). Enhanced: Fix plus richer color and eyes that adapt to light (0.1 ms); it also turns on Night vision and Light glare below.','select',[['Off','Off · DCS\'s own image'],['Fix','Fix · true blacks, even eyes'],['Enhanced','Enhanced · Fix plus filmic color, night vision, glare']],vrOnly),{Off:'Off',Fix:'Fix',Enhanced:'Enhanced'});
-  segmented(field(c,'panelGamut','Panel color correction',['For the Crystal Super\'s over-saturated wide-gamut panels.','Needs Fix or Enhanced. Full corrects this, Half corrects half. HUD and MFDs are not affected. Don\'t combine with Pimax\'s own color correction.'],'select',[[0,'Off · default'],[1,'Full'],[2,'Half']],colorOn),{0:'Off',1:'Full',2:'Half'});
+  segmented(field(c,'panelGamut','Panel color correction',['For the Crystal Super\'s over-saturated wide-gamut panels.','Needs Fix or Enhanced. Full corrects this, Half corrects half. HUD and MFDs are not affected. Don\'t combine with Pimax\'s own color correction.'],'select',[[0,'Off · default'],[1,'Full'],[2,'Half']],colorOn,'',vdxrVr),{0:'Off',1:'Full',2:'Half'});
   // Only the chosen mode's fine-tuning shows. With the color mode key, the other mode keeps the values set while it was chosen.
   const fixHidden = p => p.colorMode !== 'Fix', enhancedHidden = p => p.colorMode !== 'Enhanced';
   { const tip = document.createElement('p'); tip.className = 'fine'; tip.id = 'colorTuneTip'; tip.textContent = 'Choose Fix or Enhanced to fine-tune it.'; c.append(tip); }
@@ -866,13 +1149,13 @@ function buildFields() {
   field(more,'glareStreak','Star streaks','Share of the glare drawn as thin six-pointed rays. 0 = round halo only.','number',[0,1,.05],p => enhancedOn(p) && p.glare,'ratio');
   // G vision first: every VR pilot can use it; Eye-focus blur needs eye tracking.
   c = card('gVisionControls','G vision','Under high G, color fades and vision closes in, then goes black. Red-out under negative G.');
-  field(c,'gVision','Realistic G vision loss',['Grey-out, tunnel vision and blackout under G, centered on your gaze.','Works with DCS\'s own G effect without doubling it. About 0.04 ms, only while G is high.'],'toggle',null,vrOnly);
+  field(c,'gVision','Realistic G vision loss',['Grey-out, tunnel vision and blackout under G.','Works with DCS\'s own G effect without doubling it. About 0.04 ms, only while G is high.'],'toggle',null,vrOnly);
   field(c,'gVisionStrength','Effect strength','How strong the color loss, tunnel and darkening are. 1 allows a full blackout.','number',[0,1,.05],gVisionOn,'ratio');
   more = disclosure(c,'Advanced','The defaults are the module\'s own.',() => `${shown('gVisionMode')} · ${shown('gVisionTolerance')}`);
   segmented(field(more,'gVisionMode','Mode',['Auto follows DCS\'s G-EFFECT option.','Complement: DCS darkens, this adds the tunnel and color loss. Full: this does all of it, for DCS\'s G-EFFECT set to None (which also turns off DCS\'s G-LOC).'],'select',[['Auto','Auto · default'],['Complement','Complement DCS'],['Full','Full']],gVisionOn),{Auto:'Auto',Complement:'Complement',Full:'Full'});
   field(more,'gVisionTolerance','G tolerance','The sustained G at which you black out; grey-out starts about 1.2 G lower. 7.5: g-suit and straining. About 5: relaxed, no g-suit.','number',[4,10,.5],gVisionOn,'G');
   field(more,'gVisionRedout','Red-out (negative G)','A red tint below about −2 G, when G vision does all of it (Full, or Auto with DCS\'s G effect off).','toggle',null,gVisionOn);
-  field(more,'gVisionUseGaze','Follow my eyes','The tunnel moves with your eyes. Needs Quad Views with eye tracking; without it the tunnel stays straight ahead.','toggle',null,gVisionOn);
+  field(more,'gVisionUseGaze','Follow my eyes','The tunnel moves with your eyes. Needs Quad Views with eye tracking; without it the tunnel stays straight ahead.','toggle',null,gVisionOn,'',vdxrVr);
   c = card('gazeDofControls','<span class="tag">EXPERIMENTAL</span> Eye-focus blur','Nearer or farther things go slightly soft, like a real eye. Needs Quad Views with eye tracking.');
   needsNote(c,'gazeDofNeeds');
   field(c,'gazeDof','Eye-focus blur',['Subtle, and clears at once when your eyes move. Some people find it uncomfortable. About 0.18 ms.','Blurs what is at a different distance from the point you look at. Try it for a few minutes.'],'toggle',null,p => eyeTrackedVr(p) || Boolean(p.gazeDof));
@@ -888,14 +1171,18 @@ function buildFields() {
   // The in-headset panel (OFXR): with frame generation always; without it OFXR is loaded only to draw the panel.
   const panelOn = p => !p.desktop && (p.frameGen !== 'Off' || p.headsetPanel);
   c = card('panelControls','Headset panel (OSD)',['A small status panel in the headset. Its key shows or hides it in flight.','It shows FPS, DLSS 5, Engine Optimizations, Pupil shift, Depth boost and Far depth.']);
-  field(c,'headsetPanel','Headset panel','Without Frame generation, turn this on to show the panel. Your frames are not touched.','toggle',null,p => !p.desktop && p.frameGen === 'Off','',p => p.frameGen !== 'Off');
+  field(c,'headsetPanel','Headset panel','Show the status panel in the headset. Frame generation includes this panel automatically.','toggle',null,p => !p.desktop && p.frameGen === 'Off','',p => p.frameGen !== 'Off');
   { const always = document.createElement('p'); always.className = 'fine'; always.id = 'headsetPanelAlways'; always.textContent = 'The headset panel is always on with Frame generation.'; $('setting-headsetPanel').after(always); }
   field(c,'diagnosticOverlayAtStart','Visible at start','Each flight starts with the panel shown.','toggle',null,panelOn);
   field(c,'diagnosticVram','VRAM counter','Adds the video memory in use to the panel.','toggle',null,panelOn);
   field(c,'headsetPanelPosition','Position','The corner of your view the panel sits in.','select',[['UpperRight','Upper right · default'],['UpperLeft','Upper left'],['LowerRight','Lower right'],['LowerLeft','Lower left']],panelOn);
+
+  c = card('inGameMenuControls','In-Game Menu','Click the shortcut to record a new key. Changes apply at launch.');
+  field(c,'vdxrMenuKey','Open menu','Press a single key.','hotkey',null,null,'',p => !vdxrVr(p));
+  field(c,'desktopMenuKey','Open menu','Press a key, with optional Ctrl or Alt.','hotkey',null,null,'',p => !desktopEnhanced(p));
   // Every in-flight key in one card, in the rail's order: capture fields, greyed out while their feature is off in this
   // profile. With Optimizations only, the VR keys are hidden: only the Engine Optimizations key works on a monitor.
-  const vrKey = p => p.desktop;
+  const vrKey = p => p.desktop || vdxrVr(p);
   c = card('keysControls','In-flight keys','Click a key, then press the new combination. Esc cancels.');
   field(c,'diagnosticOverlayKey','Headset panel','Shows or hides the headset panel.','hotkey',null,HOTKEYS.diagnosticOverlayKey.used,'',vrKey);
   field(c,'engineToggleKey','Engine Optimizations','Off and on, to compare. Beeps: one = off, two = on.','hotkey',null,HOTKEYS.engineToggleKey.used);
@@ -903,14 +1190,14 @@ function buildFields() {
   field(c,'pupilShiftToggleKey','Pupil shift','Off and on, to compare. Beeps: low = off, high = on.','hotkey',null,HOTKEYS.pupilShiftToggleKey.used,'',vrKey);
   field(c,'depthBoostToggleKey','Depth boost','Off and on, to compare. Beeps: low = off, high = on.','hotkey',null,HOTKEYS.depthBoostToggleKey.used,'',vrKey);
   field(c,'farDepthToggleKey','Far depth','Off and on, to compare. Beeps: one = off, two = on.','hotkey',null,HOTKEYS.farDepthToggleKey.used,'',vrKey);
-  field(c,'colorModeKey','Color mode','Cycles Off, Fix and Enhanced (Visual realism page). Beeps: 1, 2 or 3.','hotkey',null,HOTKEYS.colorModeKey.used,'',vrKey);
+  field(c,'colorModeKey','Color mode','Cycles Off, Fix and Enhanced (Visual Realism page). Beeps: 1, 2 or 3.','hotkey',null,HOTKEYS.colorModeKey.used,'',p => p.desktop);
   // The module's own keys apply to every key above, so the note sits under the card heading, not under the last key.
   { const fixed = document.createElement('p'); fixed.className = 'fine keys-reserved'; fixed.textContent = 'Not available: Ctrl+Alt with F8 to F12, Page Up or Page Down (used by Engine Optimizations).'; c.querySelector('.card-heading').after(fixed); }
   // The headset software this profile uses and what runs now; the Sboys driver (Sboys route only), then the override.
   c = card('headsetControls','Headset software','Follows how you fly, chosen at the top: Pimax Play, or SteamVR for Sboys.');
   { const line = document.createElement('p'); line.className = 'headset-active'; line.id = 'headsetActive'; c.append(line, $('sboysCard')); }
   more = disclosure(c,'Runtime override','Only for an OpenXR runtime that is not registered in Windows.',p => p.runtimeManifestPath ? p.runtimeManifestPath.split(/[\\/]/).pop() : 'Registered runtime');
-  field(more,'runtimeManifestPath','OpenXR runtime file','The JSON file of an OpenXR runtime to use instead of the registered one. Normally leave it empty. Not used with Optimizations only.','path',null,p => !p.desktop);
+  field(more,'runtimeManifestPath','OpenXR runtime file','Choose a runtime JSON to override the registered OpenXR runtime for this VR profile. An empty field follows the registered runtime.','path',null,p => !p.desktop);
   // Why a greyed-out setting waits (field()'s why), for the fields that do not set one: what to turn on or choose first.
   const because = (test,text) => fields.filter(test).forEach(f => { if (!f.why) f.why = text; }), at = (...paths) => f => paths.includes(f.path), fgOff = p => p.frameGen === 'Off';
   const qvWhy = p => p.quadViews !== 'QuadViewsFoveated' ? 'Choose Bundled Quad Views as the provider to change these.' : 'Not with an alternative Quad Views provider.', bundledWhy = 'Needs the bundled Quad Views (Quad Views page).';
@@ -922,7 +1209,7 @@ function buildFields() {
   because(at('neuralFocusArea'),p => !nr(p) ? dlssWhy : p.quadViews !== 'QuadViewsFoveated' ? bundledWhy : null);
   because(at('quadNeuralEdgeFade'),p => !nr(p) ? dlssWhy : p.quadViews !== 'QuadViewsFoveated' ? bundledWhy : p.neuralFocusArea < 100 ? 'Set DLSS 5 area to Whole focus area to use this.' : effectiveFovea(p).blend > 0 ? null : 'Needs Focus edge blending above 0 (Quad Views page).');
   because(f => f.condition === nr,dlssWhy);
-  because(at('keepOtherDxgi'),'Turn on DLSS 5 or Foveated Super Resolution to change this.');
+  because(at('keepOtherDxgi'),'Choose Desktop Enhanced, or turn on DLSS 5 or Foveated Super Resolution in VR, to change this.');
   // Focus area without Quad Views: sized by DLSS 5 or Foveated Super Resolution; the periphery by Foveated Super Resolution only.
   const stereoWhy = 'Turn on DLSS 5 or Foveated Super Resolution to change these.';
   because(at('peripheralScale'),p => stereoCheeky(p) ? 'Turn on Foveated Super Resolution to change this.' : stereoWhy);
@@ -971,19 +1258,32 @@ function buildFeatureList() {
 }
 function navigate(id) {
   // The VR pages are hidden with Optimizations only: whatever leads there (Ctrl+number, a link, search) opens the overview.
-  if (profile?.desktop && VR_PAGES.includes(id)) id = 'overview';
+  if (!pageAvailable(profile,id)) id = 'overview';
   const entry = pages.find(p => p[0] === id); if (!entry) return; page = id;
   pages.forEach(p => { $('page-'+p[0]).hidden = p[0] !== id; $('nav-'+p[0]).classList.toggle('selected',p[0] === id); $('nav-'+p[0]).setAttribute('aria-current',p[0] === id ? 'page' : 'false'); });
-  $('pageTitle').textContent = entry[1]; $('pageDescription').textContent = entry[2]; $('scrollArea').scrollTop = 0;
+  const [title,description] = pageCopy(profile,id);
+  $('pageTitle').textContent = id === 'setup' ? $('nav-setup').querySelector('b').textContent : title; $('pageDescription').textContent = id === 'setup' && desktopEnhanced(profile) ? 'Where DCS is installed, the DCS launcher and monitor output settings.' : description; $('scrollArea').scrollTop = 0;
   if (id === 'foveation' && profile) rereadPimax(false);
   if (id === 'boost' && profile) refreshBoostPlan(0);
   if (id === 'engine' && profile) refreshEngine();
-  if (id === 'pupil' && profile) { renderPupilNeeds(); refreshPupil(); }
+  if (id === 'pupil' && profile && !vdxrVr(profile)) { renderPupilNeeds(); refreshPupil(); }
   if (id === 'foveation' && profile) renderStabilityNeeds();
   if (id === 'visual' && profile) renderVisualNeeds();
+  if (id === 'osd' && profile) refreshMenuShortcut();
   if (id === 'support' && profile) refreshDlssFocus();
   if (id === 'guide') renderGuide();
   if (id === 'overview' && profile) loadFlight();
+}
+async function refreshMenuShortcut() {
+  if (!profile || !hasBackendMenu(profile)) return;
+  try {
+    const keys = await request('menuShortcuts');
+    if (!hasBackendMenu(profile)) return;
+    const path = vdxrVr(profile) ? 'vdxrMenuKey' : 'desktopMenuKey';
+    const field = fields.find(f => f.path === path);
+    if (profile[path] == null && !field.input.classList.contains('capturing'))
+      setFieldValue(field,keyCode(vdxrVr(profile) ? keys.vdxr : keys.desktop));
+  } catch (error) { showError(error); }
 }
 // ---- Pimax Play focus values ------------------------------------------------------------------------------------
 async function rereadPimax(announce) {
@@ -1038,13 +1338,15 @@ async function forgetRuntime() {
   catch (error) { showError(error); } finally { setBusy(false); updateControls(); }
 }
 function renderSavedRuntime() {
-  const box = $('savedRuntime'), s = state?.savedRuntime, retained = state?.retainedRuntime, own = profile.neuralRuntimePath;
-  $('input-neuralRuntimePath').placeholder = s ? 'Saved copy · version '+(s.version || 'unknown') : 'nvngx_dlssnr.dll';
+  const box = $('savedRuntime'), s = state?.savedRuntime, bundled = state?.bundledNeuralRuntime, retained = state?.retainedRuntime, own = profile.neuralRuntimePath;
+  const details = $('nrRuntimeDetails'), configured = Boolean(own || s || bundled);
+  if (details.dataset.configured !== String(configured)) { details.open = !configured; details.dataset.configured = String(configured); }
+  $('input-neuralRuntimePath').placeholder = s ? 'Saved copy · version '+(s.version || 'unknown') : bundled ? 'Included runtime · version '+(bundled.version || 'unknown') : 'nvngx_dlssnr.dll';
   // With a saved copy, Change… replaces Browse.
-  $('browse-neuralRuntimePath').hidden = Boolean(s);
-  box.hidden = !s && !retained; if (box.hidden) { box.innerHTML = ''; return; }
+  $('browse-neuralRuntimePath').hidden = Boolean(s || bundled);
+  box.hidden = !s && !bundled && !retained; if (box.hidden) { box.innerHTML = ''; return; }
   const kept = retained ? `<p class="fine">The forgotten copy stays at ${escape(retained)} because the applied profile uses it. It is deleted once that profile is no longer applied.</p>` : '';
-  if (!s) { box.innerHTML = kept; return; }
+  if (!s) { box.innerHTML = (bundled ? `<div class="saved-runtime-head"><div><b>Included runtime · version ${escape(bundled.version || 'unknown')}</b><small>${escape(bundled.path)}</small></div><div class="saved-runtime-actions"><button type="button" class="button secondary" id="changeRuntime"${busy ? ' disabled' : ''}>Change…</button></div></div>` : '') + (own ? '<p class="fine">This profile uses the file entered above.</p>' : '') + kept; return; }
   box.innerHTML = `<div class="saved-runtime-head"><div><b>Saved copy · version ${escape(s.version || 'unknown')} · from ${escape(s.originalPath)}</b><small>Kept at ${escape(s.path)} · ${s.modified ? 'NVIDIA\'s file changed by a compatibility patch, not signed by NVIDIA' : 'NVIDIA signature verified'} · saved ${new Date(s.savedAt).toLocaleString('en-GB')}${s.originalExists ? '' : ' · the original file is gone, the copy is still used'}</small></div><div class="saved-runtime-actions"><button type="button" class="button secondary" id="changeRuntime"${busy ? ' disabled' : ''}>Change…</button><button type="button" class="button quiet" id="forgetRuntime"${busy ? ' disabled' : ''}>Forget</button></div></div>`
     + (own ? '<p class="fine">This profile uses the file entered above. Clear the field to use the saved copy.</p>' : '') + kept;
 }
@@ -1277,7 +1579,7 @@ function renderBoostPlan({plan:b, dcsLog}) {
     `<p class="fine">Set in DCS's settings: ${escape(b.smallWindow || '')}. Back to stock DCS puts your values back.</p>`);
   const services = b.tobiiServices || [];
   const tobii = section('Desktop Tobii eye tracker',profile.desktop ? vrOnly : !services.length ? 'No desktop Tobii eye tracker on this PC: nothing to pause.' : profile.pauseTobiiDesktop ? `${plural(services.length,'Tobii service','Tobii services')} paused while DCS runs.` : 'Off. A desktop Tobii tracker keeps running.', services.length
-    ? `<p class="fine">Paused while DCS runs, started again when it exits: ${services.map(s => '<b>'+escape(s)+'</b>').join(', ')}. The eye tracking services of the headset are not touched.</p>` : '');
+    ? `<p class="fine">Desktop Tobii services paused while DCS runs and started again when it exits: ${services.map(s => '<b>'+escape(s)+'</b>').join(', ')}.</p>` : '');
   // CPU Boost: priority and cores for DCS, and how many headset services and apps move away, then the full plan.
   const rows = [['DCS main and render threads',b.renderCores],['VR runtime and headset services',b.vrRuntimeCores],['Background apps',b.backgroundCores]];
   const processes = b.processes.length ? `<table class="boost-table"><thead><tr><th>Process</th><th>Change</th><th>Running</th><th>Admin</th></tr></thead><tbody>${b.processes.map(p => `<tr><td><b>${escape(p.name)}</b><small>${escape(p.category)}</small></td><td>${escape(p.action)}</td><td>${p.running ? 'Yes' : 'No'}</td><td>${p.needsAdministrator ? (profile.boostElevated ? 'Yes · asked at launch' : 'Needed · left as is') : '—'}</td></tr>`).join('')}</tbody></table>` : '<p class="fine">No processes would change.</p>';
@@ -1319,25 +1621,85 @@ function showReasons() {
     });
   });
 }
+function updateDesktopFgHardware() {
+  const caps = state?.gpu?.desktopFrameGeneration;
+  if (!caps) return;
+  const settings = screenSettings(profile), factor = fields.find(f => f.path === 'optiScalerFrameGenerationFactor');
+  const toggle = fields.find(f => f.path === 'optiScalerFrameGeneration');
+  toggle.input.disabled ||= caps.supported === false && !settings.frameGeneration;
+  toggle.element.classList.toggle('inactive',toggle.input.disabled);
+  factor.element.hidden = caps.supported === false;
+  for (const option of factor.input.options) {
+    const value = Number(option.value), requirement = value === 0 ? caps.dynamicRequirement : value > caps.maxMultiplier ? caps.multiplierRequirement : null;
+    option.hidden = value === 0 ? caps.dynamicSupported === false && !requirement : caps.maxMultiplier != null && value > caps.maxMultiplier && !requirement;
+    option.disabled = option.hidden || Boolean(requirement);
+    option.textContent = (value === 0 ? 'Auto' : value+'×') + (requirement ? ' · '+requirement : '');
+  }
+  const savedRequirement = settings.frameGeneration && caps.supported !== false
+    ? settings.dynamicFrameGeneration && caps.dynamicSupported === false ? caps.dynamicRequirement || 'Auto requires a GeForce RTX 50 Series GPU.'
+      : !settings.dynamicFrameGeneration && caps.maxMultiplier != null && settings.frameGenerationFactor > caps.maxMultiplier
+        ? caps.multiplierRequirement || `Select ${caps.maxMultiplier}× for this GPU.` : '' : '';
+  $('desktopFgHardware').textContent = [caps.note,savedRequirement].filter(Boolean).join(' ');
+}
 function updateControls() {
   if (!profile) return;
   document.querySelectorAll('input[type=range]').forEach(paintRange);
-  fields.forEach(f => { const inactive = Boolean(f.condition && !f.condition(profile)); f.element.classList.toggle('inactive',inactive); f.input.disabled = busy || inactive; if (f.range) f.range.disabled = busy || inactive; f.element.hidden = Boolean(f.hide && f.hide(profile)); });
+  const vdxr = vdxrVr(profile);
+  $('help-neuralRendering').textContent = vdxr ? 'Enable neural rendering in the focus area.' : fields.find(f => f.path === 'neuralRendering').description;
+  const ofxrFields = ['frameGenAdaptiveCadence','frameGenDeepPipeline','refreshFromHeadset','showOverlay','diagnosticRecorder','diagnosticFrameRecords','frameGenAsyncArm'];
+  fields.forEach(f => { const inactive = Boolean(f.condition && !f.condition(profile)); f.element.classList.toggle('inactive',inactive); f.input.disabled = busy || inactive; if (f.range) f.range.disabled = busy || inactive;
+    const vdxrFocus = f.path.startsWith('vdxrFocus');
+    f.element.hidden = Boolean(f.hide && f.hide(profile)) || (vdxrFocus ? !vdxr : vdxr && (ofxrFields.includes(f.path) || (f.page === 'foveation' && f.path !== 'quadViews'))); });
+  document.querySelectorAll('[data-ofxr-only]').forEach(panel => panel.hidden = vdxr);
+  $('headTrackingHeader').hidden = $('headOffsetColumns').hidden = !vdxr;
+  const perceptionColumns = $('perceptionColumns'), eyeControls = $('eyeControls');
+  perceptionColumns.hidden = vdxr;
+  const eyeColumn = vdxr ? $('headTrackingEyeDistance') : perceptionColumns.firstElementChild;
+  if (eyeControls.parentElement !== eyeColumn) eyeColumn.prepend(eyeControls);
+  $('gazeDofControls').hidden = vdxr;
+  if (page === 'visual') $('pageDescription').textContent = pageCopy(profile,'visual')[1];
+  $('focusControls').hidden = vdxr && profile.quadViews !== 'CheekyNative';
+  $('vdxrFocusPreviewCard').hidden = !vdxr;
+  $('vdxrStereoControls').hidden = !vdxrQuad(profile);
+  renderVdxrFocusPreview(profile);
+  $('focusAreaHelp').textContent = vdxr ? 'Size and shape of the sharp area.' : "Size and detail of the sharp area, in Pimax Play's units.";
+  ['sharpnessControls','stabilityControls'].forEach(id => $(id).hidden = vdxr);
+  $('page-foveation').querySelector('.coverage-card').hidden = vdxr;
+  document.querySelectorAll('#foveationControls details').forEach(panel => panel.hidden = vdxr);
+  const quadProvider = fields.find(f => f.path === 'quadViews'), quadHelp = $('help-quadViews');
+  [...quadProvider.input.options].forEach(o => { o.hidden = vdxr ? !['None','CheekyNative'].includes(o.value) : o.value === 'CheekyNative'; });
+  quadHelp.dataset.original ??= quadHelp.innerHTML;
+  quadHelp.innerHTML = vdxr ? 'Four views with a configurable focus area.' : quadHelp.dataset.original;
+  const fgFactor = fields.find(f => f.path === 'frameGenFactor');
+  [...fgFactor.input.options].forEach(o => { o.hidden = !vdxr && o.value === '4'; o.disabled = o.hidden; });
+  const factorHelp = $('help-frameGenFactor');
+  factorHelp.dataset.original ??= factorHelp.innerHTML;
+  factorHelp.innerHTML = vdxr ? 'Select Auto or a fixed output multiplier. Note: Advanced frame-generation controls are available in the F8 menu.' : factorHelp.dataset.original;
+  const limitHelp = $('help-fpsLimit');
+  limitHelp.dataset.original ??= limitHelp.innerHTML;
+  limitHelp.innerHTML = vdxr ? 'Match refresh sets the DCS native limit to the headset refresh rate.' : limitHelp.dataset.original;
+  const focusSource = fields.find(f => f.path === 'foveaSource'), gaze = fields.find(f => f.path === 'gaze');
+  [...focusSource.input.options].forEach(o => { o.hidden = vdxr && o.value === 'PimaxPlay'; });
+  [...gaze.input.options].forEach(o => { o.hidden = vdxr && o.value === 'EyeTracked'; });
+  updateDesktopFgHardware();
   // A fold that follows a choice (the color mode's fine-tuning) is gone while all its settings are.
   document.querySelectorAll('details[data-hide]').forEach(d => { d.hidden = [...d.querySelectorAll('.setting')].every(e => e.hidden); });
   if ($('colorTuneTip')) $('colorTuneTip').hidden = !profile || profile.desktop || profile.colorMode !== 'Off';
-  // With Optimizations only there is no headset panel; the Keys & headset panel page keeps the keys that work on a monitor.
-  $('panelControls').hidden = Boolean(profile.desktop);
+  // With Optimizations only there is no headset panel; the In flight page keeps the keys that work on a monitor.
+  $('panelControls').hidden = Boolean(profile.desktop) || vdxr;
+  $('inGameMenuControls').hidden = !hasBackendMenu(profile);
+  $('panelControls').parentElement.hidden = $('panelControls').hidden && $('inGameMenuControls').hidden;
+  if (page === 'osd') $('pageDescription').textContent = pageCopy(profile,'osd')[1];
   // Pimax native exists only on the Pimax route and cannot host the focus adapter DLSS needs.
   const native = $('input-quadViews').querySelector('[value=PimaxNative]'); native.disabled = !nativeAllowed(profile);
-  native.textContent = 'Pimax native Quad Views' + (profile.runtime === 'SboysSteamVr' ? ' · Pimax route only' : native.disabled ? ' · not with DLSS 5' : '');
+  native.textContent = 'Pimax native Quad Views' + (profile.runtime !== 'Pimax' ? ' · Pimax route only' : native.disabled ? ' · not with DLSS 5' : '');
   // Segmented choices follow their select's value, its disabled state and option texts (Pimax native's just above).
   fields.forEach(syncSegment);
   // Foveated Super Resolution is a stereo option: its card is gone while Quad Views is on.
   $('foveatedDlssControls').hidden = $('stereoFocusControls').hidden = profile.quadViews !== 'None';
   // While the rate is read from the headset, say which value is used: the one read, or this one until one is read.
   { const f = fields.find(x => x.path === 'headsetRefreshHz'), hz = state?.headsetRefresh?.hz;
-    $('help-headsetRefreshHz').textContent = !profile.refreshFromHeadset ? f.description : hz ? `Read from the headset: ${num(hz)} Hz.` : 'Not read yet: this value is used until the headset software reports one.'; }
+    $('help-headsetRefreshHz').textContent = vdxr ? 'Cheeky targets this refresh rate. Use the VR frame rate selected in Virtual Desktop.' : !profile.refreshFromHeadset ? f.description : hz ? `Read from the headset: ${num(hz)} Hz.` : 'Not read yet: this value is used until the headset software reports one.'; }
   // Stereo Cheeky clamps these ratios to 0.2 or more: say which value is written when the field holds less.
   fields.filter(f => ['foveaWidth','foveaHeight','peripheralScale'].includes(f.path)).forEach(f => {
     const help = $('help-'+f.path), clamped = stereoCheeky(profile) && Number(profile[f.path]) < CHEEKY_MIN;
@@ -1371,10 +1733,10 @@ function updateControls() {
   renderPimax(); renderFeatures(); renderSavedRuntime();
   // The feature cards above the tiles are the checklist (buildFeatureList). The tiles show what the cards do not, in VR:
   // Perception, Visual realism and the headset panel. Each opens the page that configures it.
-  const names = {};
-  const tile = ([target,label,active,title,detail]) => { if (!active) { title = names[target] || title; detail = String(detail).replace(/^Off · /,''); } else detail = String(detail).replace(/^(Bundled|Pimax native|NVIDIA|FidelityFX) · /,''); return `<button type="button" class="stage ${active ? 'on' : 'off'}" data-page="${target}" aria-label="${escape(title)}: ${active ? 'on' : 'off'}. Open settings"><span>${label}<em>${active ? 'ON' : 'OFF'}</em></span><b>${escape(title)}</b><small>${escape(detail)}</small></button>`; };
+  const tile = ([target,label,active,title,detail]) => { if (!active) { detail = String(detail).replace(/^Off · /,''); } else detail = String(detail).replace(/^(Bundled|Pimax native|NVIDIA|FidelityFX) · /,''); return `<button type="button" class="stage ${active ? 'on' : 'off'}" data-page="${target}" aria-label="${escape(title)}: ${active ? 'on' : 'off'}. Open settings"><span>${label}<em>${active ? 'ON' : 'OFF'}</em></span><b>${escape(title)}</b><small>${escape(detail)}</small></button>`; };
   // Then, in VR, what the checklist does not show (as the "Also on" line under it): Perception, Visual realism, the headset panel.
-  const look = [['pupil','EYES &amp; DEPTH','Perception',g => g.section === 'perception','Depth boost, Far depth, Pupil shift'],['visual','COLOR, NIGHT &amp; G','Visual realism',g => g.section === 'visual','Color, night vision, G vision'],['osd','HEADSET PANEL','Keys & headset panel',g => g.page === 'osd','Status panel in the headset']].map(([target,label,name,test,offer]) => {
+  const look = [['pupil','EYES &amp; DEPTH','Perception',g => g.section === 'perception','Depth boost, Far depth, Pupil shift'],['visual','COLOR, NIGHT &amp; G','Visual realism',g => g.section === 'visual','Color, night vision, G vision'],['osd','HEADSET PANEL','In Flight',g => g.page === 'osd','Status panel in the headset']].map(([target,label,name,test,offer]) => {
+    if (target === 'pupil' && vdxr) return [target,'FOCUS OFFSET',vdxrQuad(profile) && profile.vdxrFocusHeadOffset,headTrackingPage[0],headTrackingPage[2]];
     const list = FEATURE_GUIDE.filter(g => test(g) && g.on(profile)).map(g => g.name === 'Color modes' ? 'Color: '+profile.colorMode : g.name);
     return [target,label,list.length > 0,name,list.length ? list.join(' · ') : offer];
   });
@@ -1394,22 +1756,67 @@ function updateControls() {
   renderDashboard();
   const live = state?.activeRoute?.route;
   document.querySelectorAll('#routeSwitch [data-route]').forEach(button => {
-    const selected = profile.desktop ? button.dataset.route === 'Desktop' : button.dataset.route === profile.runtime;
+    const selected = profile.desktop ? button.dataset.route === (profile.desktopEnhanced ? 'DesktopEnhanced' : 'Desktop') : button.dataset.route === profile.runtime;
     button.classList.toggle('selected', selected); button.setAttribute('aria-checked', String(selected));
     button.classList.toggle('live', live === button.dataset.route); button.disabled = busy;
   });
-  $('routeLive').textContent = profile.desktop ? 'Another headset or a monitor: DCS runs as you set it up, with Engine Optimizations, CPU Boost and Free VRAM.' : state?.activeRoute?.summary || '';
+  $('routeLive').textContent = profile.desktop ? profile.desktopEnhanced ? 'Neural rendering, super resolution and frame generation on a monitor. Choose NR, SR and frame generation here; Launch DCS applies the settings.' : 'Another headset or a monitor: DCS runs as you set it up, with Engine Optimizations, CPU Boost and Free VRAM.' : state?.activeRoute?.summary || '';
   $('routeSwitch').title = $('routeLive').textContent;
   $('routeLive').classList.toggle('mismatch', !profile.desktop && Boolean(live) && live !== profile.runtime);
   // The VR feature pages are hidden without a headset; an open one goes back to the overview.
-  VR_PAGES.forEach(id => $('nav-'+id).hidden = Boolean(profile.desktop)); $('railGroup-foveation').hidden = Boolean(profile.desktop); $('headsetPanelAlways').hidden = Boolean(profile.desktop) || profile.frameGen === 'Off';
+  VR_PAGES.forEach(id => $('nav-'+id).hidden = !pageAvailable(profile,id)); $('railGroup-foveation').hidden = Boolean(profile.desktop) && !desktopEnhanced(profile); $('headsetPanelAlways').hidden = Boolean(profile.desktop) || vdxr || profile.frameGen === 'Off';
+  $('nav-sr').hidden = !pageAvailable(profile,'sr');
+  const [dlssTitle,,dlssSubtitle] = pageCopy(profile,'dlss');
+  const dlssNav = $('nav-dlss');
+  dlssNav.querySelector('b').textContent = dlssTitle;
+  dlssNav.querySelector('small').textContent = dlssSubtitle;
+  dlssNav.title = dlssTitle+' (Ctrl 6)'; dlssNav.setAttribute('aria-label',dlssTitle);
+  $('railGroup-foveation').textContent = desktopEnhanced(profile) ? 'Rendering' : 'VR';
+  const [pupilTitle,pupilDescription,pupilSubtitle] = pageCopy(profile,'pupil');
+  const pupilNav = $('nav-pupil');
+  pupilNav.querySelector('b').textContent = pupilTitle;
+  pupilNav.querySelector('small').textContent = pupilSubtitle;
+  pupilNav.title = pupilTitle+' (Ctrl 8)'; pupilNav.setAttribute('aria-label',pupilTitle);
+  if (page === 'pupil') {
+    $('pageTitle').textContent = pupilTitle;
+    $('pageDescription').textContent = pupilDescription;
+  }
+  const setupTitle = desktopEnhanced(profile) ? 'DCS & Display' : 'DCS & Headset';
+  $('nav-setup').querySelector('b').textContent = setupTitle;
+  $('nav-setup').title = setupTitle; $('nav-setup').setAttribute('aria-label',setupTitle);
+  if (page === 'setup') {
+    $('pageTitle').textContent = setupTitle;
+    $('pageDescription').textContent = desktopEnhanced(profile) ? 'Where DCS is installed, the DCS launcher and monitor output settings.' : pages.find(p => p[0] === 'setup')[2];
+  }
+  ['desktopDlssControls','desktopCompressionControls','desktopSrControls','desktopFramegenControls','desktopPacingControls','desktopCadence','desktopOutputControls','desktopNeuralAdvanced'].forEach(id => $(id).hidden = !desktopEnhanced(profile));
+  $('vdxrSrColumns').hidden = !vdxr;
+  const runtimeToggle = $('setting-'+(desktopEnhanced(profile) ? 'optiScalerNeuralRendering' : 'neuralRendering'));
+  if (runtimeToggle.nextElementSibling !== $('nrRuntimeDetails')) runtimeToggle.after($('nrRuntimeDetails'));
+  const hudPreset = $('setting-'+(desktopEnhanced(profile) ? 'optiScalerPreset' : 'peripheryDlssPreset'));
+  if (hudPreset.nextElementSibling !== $('setting-hudAfterDlss')) {
+    hudPreset.after($('setting-hudAfterDlss'));
+    fields.find(f => f.path === 'hudAfterDlss').page = desktopEnhanced(profile) ? 'sr' : 'dlss';
+  }
+  fillOutputChoices();
+  updateCompressionPreview();
+  ['dlssMissing','dlssControls','dlssProcessing','dlssPresets','neuralAdvanced','framegenControls','pacingControls'].forEach(id => $(id).hidden = desktopEnhanced(profile));
+  if (desktopEnhanced(profile) || vdxr) $('foveatedDlssControls').hidden = $('stereoFocusControls').hidden = true;
+  $('dlssPresets').hidden = desktopEnhanced(profile) || vdxr;
+  $('vdxrNrAdaptiveControls').hidden = !vdxr;
+  const nrImage = $('dlssProcessing');
+  if (vdxr && nrImage.parentElement !== $('vdxrNrImageColumn')) $('vdxrNrImageColumn').append(nrImage);
+  if (!vdxr && nrImage.previousElementSibling !== $('dlssControls')) $('dlssControls').after(nrImage);
+  $('page-framegen').querySelector('.cadence-card').hidden = desktopEnhanced(profile);
+  if (page === 'dlss') $('pageTitle').textContent = dlssTitle;
+  if (page === 'dlss' || page === 'sr' || page === 'framegen') $('pageDescription').textContent = page === 'framegen' && desktopEnhanced(profile)
+    ? 'DLSS frame generation for monitor output. Launch DCS applies these settings.' : pageCopy(profile,page)[1];
   renderAlsoOn(); renderNavState(); $('dlssFocusCard').hidden = Boolean(profile.desktop) || !profile.neuralRendering;
-  if (profile.desktop && VR_PAGES.includes(page)) navigate('overview');
+  if (!pageAvailable(profile,page)) navigate('overview');
   // The Sboys driver is only needed on the Sboys route.
   $('sboysCard').hidden = profile.runtime !== 'SboysSteamVr' || Boolean(profile.desktop);
   $('headsetControls').hidden = Boolean(profile.desktop);
   renderHeadsetSoftware(); renderSuiteNote();
-  renderCadence();
+  if (desktopEnhanced(profile)) renderDesktopCadence(); else renderCadence();
   // A fold whose settings are all greyed out shows its value greyed out too.
   foldValues.forEach(({box,value}) => { box.querySelector(':scope > summary > .fold-value').textContent = value(profile);
     const shownSettings = [...box.querySelectorAll('.setting')].filter(e => !e.hidden); box.classList.toggle('idle', shownSettings.length > 0 && shownSettings.every(e => e.classList.contains('inactive'))); });
@@ -1420,15 +1827,15 @@ function updateControls() {
 /** DCS & headset: the headset software of this profile (with Pimax Play's version) and what runs on this PC now. */
 function renderHeadsetSoftware() {
   const version = state?.inventory?.pimaxVersion, summary = state?.activeRoute?.summary;
-  const software = profile.runtime === 'SboysSteamVr' ? 'SteamVR' : 'Pimax Play' + (version ? ' '+version : '');
+  const software = profile.runtime === 'SboysSteamVr' ? 'SteamVR' : profile.runtime === 'Vdxr' ? 'Virtual Desktop · VDXR' : 'Pimax Play' + (version ? ' '+version : '');
   $('headsetActive').innerHTML = `<b>${escape(software)}</b>${summary ? `<span>${escape(summary)}</span>` : ''}`;
 }
 /** The rail says at a glance what is on: ON or OFF next to each feature page (Perception and Visual realism are on when
  *  any of their features is). */
 function renderNavState() {
   const on = featureState(profile), any = section => FEATURE_GUIDE.some(g => g.section === section && g.on(profile));
-  const states = {engine:on.engine, boost:on.boost, foveation:on.quad, dlss:on.dlss, framegen:on.framegen, pupil:any('perception'), visual:any('visual')};
-  Object.entries(states).forEach(([id,active]) => { const tag = $('navState-'+id); tag.hidden = false; tag.textContent = active ? 'ON' : 'OFF'; tag.classList.toggle('on',Boolean(active)); $('nav-'+id).setAttribute('aria-label', pages.find(p => p[0] === id)[1]+(active ? ', on' : ', off')); });
+  const states = {engine:on.engine, boost:on.boost, foveation:on.quad, dlss:on.dlss, sr:on.sr, framegen:on.framegen, pupil:vdxrVr(profile) ? on.quad && profile.vdxrFocusHeadOffset : any('perception'), visual:any('visual')};
+  Object.entries(states).forEach(([id,active]) => { const tag = $('navState-'+id); tag.hidden = false; tag.textContent = active ? 'ON' : 'OFF'; tag.classList.toggle('on',Boolean(active)); $('nav-'+id).setAttribute('aria-label', pageCopy(profile,id)[0]+(active ? ', on' : ', off')); });
 }
 /** Under the checklist: the Perception, Visual realism and headset panel features that apply at launch, each opening its page. */
 function renderAlsoOn() {
@@ -1437,19 +1844,33 @@ function renderAlsoOn() {
   $('alsoOn').innerHTML = on.length ? 'Also on: '+on.map(g => `<button type="button" class="link-button" data-open-page="${g.page}" title="Open ${escape(g.name)} settings">${escape(name(g))}</button>`).join(', ') : '';
   $('alsoOn').hidden = !on.length;
 }
+function renderDesktopCadence() {
+  const s = screenSettings(profile), displays = state?.outputDisplays || [];
+  const display = displays.find(d => d.id === s.outputDisplay) || displays[0], hz = Number(display?.refresh);
+  const target = s.outputFrameLimit === 'MatchRefresh' ? hz : s.outputFrameLimit === 'Custom' ? s.frameRateTarget : 0;
+  const dynamic = s.frameGeneration && s.dynamicFrameGeneration;
+  const multiplier = !s.frameGeneration ? 1 : dynamic ? Number(state?.gpu?.desktopFrameGeneration?.maxMultiplier) : s.frameGenerationFactor;
+  const n = value => Math.round(value).toLocaleString('en-US'), cap = target / multiplier;
+  const metrics = [
+    ['DCS NEEDS TO RENDER',cap > 0 ? n(cap)+' FPS' : 'Not set',dynamic ? 'Minimum required frame rate.\nNote: Generated frames only while DCS falls behind.' : s.frameGeneration ? `Output target divided by ${multiplier}×.` : 'Output target with frame generation off.'],
+    ['TARGET FRAME RATE',target > 0 ? n(target)+' FPS' : 'Keep output limit','Displayed frame-rate limit, including generated frames.'],
+    ['DISPLAY REFRESH RATE',hz > 0 ? n(hz)+' Hz' : 'Read display settings',display?.name || 'Primary display']
+  ];
+  $('desktopCadenceMetrics').innerHTML = metrics.map(b => `<div class="budget"><span>${b[0]}</span><strong>${b[1]}</strong><p>${escape(b[2]).replaceAll('\n','<br>')}</p></div>`).join('');
+}
 function renderCadence() {
   // multiplier: the most displayed frames per rendered frame; target: what DCS should render (FramePacing.CapDivider),
   // the full refresh rate with frame generation only when needed.
-  const fg = profile.frameGen !== 'Off', adaptive = usesAdaptiveCadence(profile), multiplier = fg ? (profile.frameGenFactor === 3 ? 3 : 2) : 1, hz = refreshHz(profile), target = hz / capDivider(profile);
+  const fg = profile.frameGen !== 'Off', adaptive = usesAdaptiveCadence(profile), multiplier = fg ? (profile.frameGenFactor === 4 ? 4 : profile.frameGenFactor === 3 ? 3 : 2) : 1, hz = refreshHz(profile), target = hz / capDivider(profile);
   const detected = Number(state?.inventory?.dcsSettings?.['graphics.maxFPS']);
   // With frame generation only when needed, Keep is written as Match refresh (FramePacing.EffectiveLimit).
   const limit = profile.fpsLimit === 'Preserve' && adaptive ? 'MatchRefresh' : profile.fpsLimit;
-  const cap = limit === 'Preserve' ? (Number.isFinite(detected) && detected > 0 ? detected : null) : limit === 'RuntimeHeadroom' ? 300 : limit === 'MatchRefresh' ? Math.max(30, target) : profile.renderedFpsCap;
+  const cap = limit === 'Preserve' ? (Number.isFinite(detected) && detected > 0 ? detected : null) : limit === 'RuntimeHeadroom' ? 300 : limit === 'MatchRefresh' ? Math.max(30, vdxrVr(profile) ? hz : target) : profile.renderedFpsCap;
   const n = value => Number(value.toFixed(3)).toLocaleString('en-US');
   const metrics = [
-    ['DCS NEEDS TO RENDER',n(target)+' FPS',adaptive ? 'The full refresh rate; generated frames only while DCS falls behind.' : fg ? (profile.frameGenFactor === 0 ? 'Half the refresh rate; a third while DCS falls behind.' : multiplier === 3 ? 'A third of the refresh rate.' : 'Half the refresh rate.') : 'The full refresh rate; frame generation is off.'],
+    ['DCS NEEDS TO RENDER',n(target)+' FPS',profile.runtime === 'Vdxr' && fg ? (profile.frameGenFactor === 0 ? 'Auto selects the frame-generation multiplier.' : 'The refresh rate divided by the selected multiplier.') : adaptive ? 'The full refresh rate; generated frames only while DCS falls behind.' : fg ? (profile.frameGenFactor === 0 ? 'Half the refresh rate; a third while DCS falls behind.' : multiplier === 3 ? 'A third of the refresh rate.' : 'Half the refresh rate.') : 'The full refresh rate; frame generation is off.'],
     ['DCS FRAME LIMIT',cap === null ? 'Not set' : n(cap)+' FPS',limit === 'Preserve' ? (cap === null ? 'DCS has no limit set; left as it is.' : 'DCS\'s own limit, left as it is.') : profile.fpsLimit === 'Preserve' ? 'Set to the refresh rate for Only when needed.' : 'Set in DCS at launch.'],
-    ['HEADSET',n(hz)+' Hz' + (profile.refreshFromHeadset && state?.headsetRefresh ? ' · '+escape(state.headsetRefresh.source) : ''),fg ? `Up to ${n(cap === null ? hz : Math.min(hz,cap*multiplier))} FPS with generated frames.` : 'Set this refresh rate in Pimax Play or SteamVR.']
+    ['HEADSET',n(hz)+' Hz' + (profile.refreshFromHeadset && state?.headsetRefresh ? ' · '+escape(state.headsetRefresh.source) : ''),fg ? (profile.runtime === 'Vdxr' && profile.frameGenFactor === 0 ? 'Auto selects the multiplier up to the supported maximum.' : `Up to ${n(cap === null ? hz : Math.min(hz,cap*multiplier))} FPS with generated frames.`) : profile.runtime === 'Vdxr' ? 'Set this VR frame rate in Virtual Desktop.' : 'Set this refresh rate in Pimax Play or SteamVR.']
   ];
   $('cadenceMetrics').innerHTML = metrics.map(b => `<div class="budget"><span>${b[0]}</span><strong>${b[1]}</strong><p>${b[2]}</p></div>`).join('');
   const warnings = [];
@@ -1579,6 +2000,7 @@ setInterval(async () => {
 // ---- Checks: one list, grouped Must fix / Check yourself / OK, each line with its way to the fix ---------------------
 // Titles and links for check ids (ProfileValidation codes, Readiness ids). [title, {reveal|page|guide, label, browse}]
 const CHECK_INFO = {
+  'hud-after-dlss':['HUD after DLSS',{reveal:'hudAfterDlss',label:'Open'}],
   'neural-runtime':['DLSS 5 runtime file',{reveal:'neuralRuntimePath',label:'Select file',browse:true}],
   'dcs-not-found':['DCS executable',{reveal:'dcs',label:'Select',browse:true}], 'options-not-found':['DCS settings file',{reveal:'options',label:'Select',browse:true}], 'options-location':['DCS settings file',{reveal:'options',label:'Select',browse:true}],
   'game':['DCS and Saved Games',{reveal:'dcs',label:'Open'}], 'dcs-launcher':['DCS launcher',{reveal:'keepDcsLauncher',label:'Open'}],
@@ -1618,6 +2040,21 @@ const CHECK_INFO = {
   'periphery-preset':['Periphery DLSS preset',{reveal:'peripheryDlssPreset',label:'Open'}], 'periphery-preset-needs':['Periphery DLSS preset',{reveal:'peripheryDlssPreset',label:'Open'}],
   'periphery-preset-dlss':['Periphery DLSS preset',null], 'nvidia-dlss-preset':['NVIDIA DLSS preset',{reveal:'peripheryDlssPreset',label:'Open'}],
   'neural-area':['DLSS 5 area',{reveal:'neuralFocusArea',label:'Open'}], 'neural-depth':['Depth convention',{reveal:'neuralDepth',label:'Open'}],
+  'vdxr-focus-width':['Horizontal FOV',{reveal:'vdxrFocusWidth',label:'Open'}], 'vdxr-focus-height':['Vertical FOV',{reveal:'vdxrFocusHeight',label:'Open'}],
+  'vdxr-focus-feather':['Focus edge blending',{reveal:'vdxrFocusFeather',label:'Open'}], 'vdxr-focus-corner-radius':['Corner radius',{reveal:'vdxrFocusCornerRadius',label:'Open'}],
+  'vdxr-focus-reference-distance':['Reference distance',{reveal:'vdxrFocusReferenceDistance',label:'Open'}],
+  'vdxr-center-preset':['Center DLSS preset',{reveal:'vdxrCenterPreset',label:'Open'}],
+  'vdxr-nr-preset':['DLSS-NR preset',{reveal:'vdxrNrPreset',label:'Open'}],
+  'vdxr-center-supersampling':['Center supersampling',{reveal:'vdxrCenterSupersampling',label:'Open'}],
+  'vdxr-sr-threshold':['SR FPS threshold',{reveal:'vdxrSrThreshold',label:'Open'}],
+  'vdxr-nr-threshold':['NR FPS threshold',{reveal:'vdxrNrThreshold',label:'Open'}],
+  'vdxr-framegen-method':['Optiflow method',{reveal:'vdxrFrameGenMethod',label:'Open'}],
+  'vdxr-focus-horizontal-bias':['Horizontal fixed offset',{reveal:'vdxrFocusHorizontalBias',label:'Open'}],
+  'vdxr-focus-horizontal-deadzone':['Horizontal angle dead zone',{reveal:'vdxrFocusHorizontalDeadzone',label:'Open'}],
+  'vdxr-focus-horizontal-angle-gain':['Horizontal angle gain',{reveal:'vdxrFocusHorizontalAngleGain',label:'Open'}],
+  'vdxr-focus-vertical-bias':['Vertical fixed offset',{reveal:'vdxrFocusVerticalBias',label:'Open'}],
+  'vdxr-focus-vertical-deadzone':['Vertical angle dead zone',{reveal:'vdxrFocusVerticalDeadzone',label:'Open'}],
+  'vdxr-focus-vertical-angle-gain':['Vertical angle gain',{reveal:'vdxrFocusVerticalAngleGain',label:'Open'}],
   'fovea-width':['Focus width',{reveal:'foveaWidth',label:'Open'}], 'fovea-height':['Focus height',{reveal:'foveaHeight',label:'Open'}], 'peripheral-scale':['Peripheral resolution',{reveal:'peripheralScale',label:'Open'}], 'quad-focus-scale':['Center resolution',{reveal:'quadFocusScale',label:'Open'}], 'quad-sharpening':['Focus sharpening',{reveal:'quadSharpening',label:'Open'}], 'quad-periphery-contrast':['Periphery contrast',{reveal:'quadPeripheryContrast',label:'Open'}], 'quad-edge-blend':['Focus edge blending',{reveal:'quadEdgeBlend',label:'Open'}], 'neural-scale':['Working scale',{reveal:'neuralWorkingScale',label:'Open'}], 'neural-intensity':['Intensity',{reveal:'neuralIntensity',label:'Open'}], 'neural-local-tone':['Local tone',{reveal:'neuralLocalTone',label:'Open'}], 'neural-local-structure':['Local structure',{reveal:'neuralLocalStructure',label:'Open'}], 'neural-skin-structure':['Skin structure',{reveal:'neuralSkinStructure',label:'Open'}], 'neural-color':['Color strength',{reveal:'neuralColorStrength',label:'Open'}], 'neural-transfer':['Transfer strength',{reveal:'neuralTransferStrength',label:'Open'}], 'neural-paper-white':['Paper white scale',{reveal:'neuralPaperWhiteScale',label:'Open'}], 'neural-motion-x':['Motion scale X',{reveal:'neuralMotionScaleX',label:'Open'}], 'neural-motion-y':['Motion scale Y',{reveal:'neuralMotionScaleY',label:'Open'}], 'rendered-fps-cap':['Custom limit',{reveal:'renderedFpsCap',label:'Open'}], 'far-depth-hotkey':['Far depth switch',{reveal:'farDepthToggleKey',label:'Change'}], 'far-depth-hotkey-dcs':['Far depth switch',{reveal:'farDepthToggleKey',label:'Change'}], 'far-depth-preset':['Far depth',{reveal:'farDepthPreset',label:'Open'}], 'schema':['Profile file',null], 'profile-id':['Profile name',null], 'profile-name':['Profile name',null], 'enum':['Profile file',null]
 };
 /** A key conflict opens the key its message names first (ProfileValidation's wording). */
@@ -1672,8 +2109,8 @@ document.addEventListener('click', e => {
  *  features stay in the profile for the next VR flight but do not run, so they are not named. */
 function runsWith(p) {
   if (!p) return 'DCS as it is';
-  const on = featureState(p), vr = !p.desktop, route = p.desktop ? 'Optimizations only' : p.runtime === 'SboysSteamVr' ? 'Sboys' : 'Pimax';
-  const running = [vr && on.quad && (p.quadViews === 'PimaxNative' ? 'Pimax Quad Views' : 'Quad Views'), vr && (p.neuralRendering ? 'DLSS 5' : foveatedSr(p) && 'Foveated Super Resolution'), vr && on.framegen && 'Frame generation', on.boost && 'CPU Boost', on.engine && 'Engine Optimizations'].filter(Boolean);
+  const on = featureState(p), vr = !p.desktop, route = p.desktop ? p.desktopEnhanced ? 'Desktop Enhanced' : 'Optimizations only' : p.runtime === 'SboysSteamVr' ? 'Sboys' : p.runtime === 'Vdxr' ? 'VDXR' : 'Pimax';
+  const running = [desktopEnhanced(p) && on.dlss && 'Neural rendering', desktopEnhanced(p) && on.sr && 'Super resolution', desktopEnhanced(p) && on.framegen && 'DLSS frame generation', vr && on.quad && (p.quadViews === 'PimaxNative' ? 'Pimax Quad Views' : 'Quad Views'), vr && (p.neuralRendering ? 'DLSS 5' : foveatedSr(p) && 'Foveated Super Resolution'), vr && on.framegen && 'Frame generation', on.boost && 'CPU Boost', on.engine && 'Engine Optimizations'].filter(Boolean);
   return route+' · '+(running.length ? running.join(' + ') : 'DCS as it is');
 }
 /** Overview: what Launch DCS will do now, the profile, and the checks in one line. */
@@ -1847,8 +2284,8 @@ function renderSearch() {
     ['recovery','Stock DCS','Back to stock DCS: put back every file and setting DCS Control changed.','originals'],
     ['guide','Feature guide','What each feature does, what to expect from it and what it costs.','featureGuide']
   ].map(([page,title,description,id]) => ({page,title,description,path:id,element:$(id),input:$(id)}));
-  searchResults = [...fields,...shortcuts].filter(f => !(profile?.desktop && VR_PAGES.includes(f.page)) && !hiddenOnPage(f)).filter(f => !query || normalize(plainTitle(f.title)+' '+f.description+' '+(f.detail || '')+' '+f.path+' '+pages.find(p => p[0] === f.page).slice(1,4).join(' ')+' '+(PAGE_ALIASES[f.page] || '')).includes(query));
-  $('searchResults').innerHTML = searchResults.length ? searchResults.map((f,index) => `<button class="search-result" data-index="${index}"><div><b>${escape(plainTitle(f.title))}</b><small>${escape(f.description)}</small></div><span>${f.path === 'featureList' ? 'Right panel' : pages.find(p => p[0] === f.page)[1]} ›</span></button>`).join('') : '<div class="empty-state"><p>No settings match this search.</p></div>';
+  searchResults = [...fields,...shortcuts].filter(f => pageAvailable(profile,f.page) && !hiddenOnPage(f)).filter(f => !query || normalize(plainTitle(f.title)+' '+f.description+' '+(f.detail || '')+' '+f.path+' '+pageCopy(profile,f.page).join(' ')+' '+(PAGE_ALIASES[f.page] || '')).includes(query));
+  $('searchResults').innerHTML = searchResults.length ? searchResults.map((f,index) => `<button class="search-result" data-index="${index}"><div><b>${escape(plainTitle(f.title))}</b><small>${escape(f.description)}</small></div><span>${f.path === 'featureList' ? 'Right panel' : pageCopy(profile,f.page)[0]} ›</span></button>`).join('') : '<div class="empty-state"><p>No settings match this search.</p></div>';
   $('searchResults').querySelectorAll('button').forEach(b => b.addEventListener('click',() => revealSetting(searchResults[Number(b.dataset.index)])));
 }
 // ---- Feature guide --------------------------------------------------------------------------------------------------
@@ -1856,14 +2293,35 @@ function renderSearch() {
  *  impact: the one-word benefit on the card's badge; keyPath/keyText: its in-flight key (the profile's), if any. */
 const GUIDE_SECTIONS = [
   ['every','Every pilot','On a monitor or any headset.'],
+  ['screen','Rendering','Neural rendering, super resolution and frame generation on a monitor.'],
   ['vr','VR','Pimax headsets (and Sboys for SteamVR).'],
   ['perception','Perception','Experimental: new, off by default, and still being tuned. Feedback welcome.'],
   ['visual','Visual realism','Off by default. The color mode key switches color modes in flight.'],
   ['safety','Safety net','']
 ];
 const FEATURE_GUIDE = [
+  {section:'screen', page:'dlss', name:'Neural rendering', impact:'New look', on:p => desktopEnhanced(p) && screenSettings(p).neuralRendering,
+   gives:'NVIDIA neural rendering reworks lighting, materials and detail in the monitor image.',
+   expect:'Adjust intensity, style and advanced image controls to tune the look. Pre-SR processing runs NR at the lower input resolution.',
+   cost:'GPU time and video memory. Working scale and peripheral compression reduce the NR workload.',
+   needs:'The NVIDIA NR runtime and DCS upscaling set to DLSS.'},
+  {section:'screen', page:'dlss', name:'Peripheral compression', impact:'Less GPU work', on:p => desktopEnhanced(p) && screenSettings(p).neuralRendering && screenSettings(p).peripheralCompression,
+   gives:'Keeps the center at full density and compresses the surrounding image before NR processing.',
+   expect:'Center width and height define the full-density area. Peripheral retention controls the detail retained around it.',
+   cost:'Less NR detail in the compressed periphery.',
+   needs:'Neural rendering.'},
+  {section:'screen', page:'sr', name:'Super Resolution', impact:'More FPS', on:p => desktopEnhanced(p) && screenSettings(p).superResolution,
+   gives:'DCS renders at a lower resolution and DLSS reconstructs the monitor image.',
+   expect:'Quality through Ultra Performance trade input detail for less GPU work. The selected quality controls the input resolution. Turning SR off uses native-resolution anti-aliasing.',
+   cost:'Image detail changes with input resolution and the selected DLSS model.',
+   needs:'DCS upscaling set to DLSS and an NVIDIA RTX GPU.'},
+  {section:'screen', page:'framegen', name:'Frame generation', impact:'Smoother', on:p => desktopEnhanced(p) && screenSettings(p).frameGeneration,
+   gives:'DLSS adds generated frames between the ones DCS renders for smoother monitor output.',
+   expect:'Fixed multipliers with the output limit reduce the native frame rate needed. Auto increases the multiplier while DCS falls behind. The DCS native limit controls rendered frames separately.',
+   cost:'GPU time, video memory and added latency; fast motion can show interpolation artifacts.',
+   needs:'A supported NVIDIA GPU and driver. Available multipliers follow this PC\'s capabilities. VSync affects frame pacing.'},
   {section:'every', page:'engine', name:'Engine Optimizations', impact:'More FPS', on:p => p.engineOptimizations,
-   gives:'DCS needs less CPU time for every frame. The image stays exactly the same.',
+   gives:'DCS needs less CPU time for every frame.',
    expect:'The busier the scene, the bigger the gain: airfields, carriers and large missions run noticeably smoother. Little or no change when the graphics card is the limit.',
    cost:'Nothing visible. The first start prepares some data for a few minutes.',
    needs:'On NVIDIA, MFAA off for DCS (Checks tells you). On AMD Radeon, the multi-threaded parts need their own switch on the page.',
@@ -1872,33 +2330,56 @@ const FEATURE_GUIDE = [
    gives:'DCS gets priority and its best CPU cores; other programs step out of its way while you fly.',
    expect:'Steadier frame times when other programs compete for the CPU. On a quiet PC the difference is small.',
    cost:'None. Undone when DCS exits.'},
-  {section:'vr', page:'foveation', name:'Quad Views', impact:'More FPS', on:p => p.quadViews !== 'None',
+  {section:'vr', page:'foveation', name:'Quad Views', impact:'More FPS', hide:p => !vdxrVr(p), on:vdxrQuad,
+   gives:'DCS renders a sharper focus view and a lower-resolution peripheral view for each eye.',
+   expect:'Adjust the focus width and height, then use edge blending and stereo alignment to make the boundary less visible.',
+   cost:'A softer periphery. A larger focus area gives more of the view full detail and takes more GPU time.'},
+  {section:'vr', page:'pupil', name:'Head Tracking', impact:'Focus placement', hide:p => !vdxrVr(p), on:p => vdxrQuad(p) && p.vdxrFocusHeadOffset,
+   gives:'Moves the focus area as you turn your head. Set a fixed offset, angle gain and dead zone for each axis.',
+   expect:'The preview shows the fixed offset at the recentered pose. Set the recenter shortcut in the in-game F8 menu.',
+   needs:'Quad Views.'},
+  {section:'vr', page:'sr', name:'Super Resolution', impact:'Sharper focus', hide:p => !vdxrVr(p), on:p => vdxrQuad(p) && p.vdxrCenterSr,
+   gives:'Adjusts the DLSS preset and supersampling in the focus views. The peripheral views use DCS\'s own upscaling.',
+   expect:'Auto scale can return the center multiplier to 1× when output FPS stays below the chosen threshold.',
+   cost:'More GPU time at higher supersampling multipliers.',
+   needs:'Quad Views and DCS upscaling set to DLSS. Auto scale uses Optiflow timing.'},
+  {section:'vr', page:'dlss', name:'Neural Rendering', impact:'New look', hide:p => !vdxrVr(p), on:p => p.neuralRendering,
+   gives:'NVIDIA neural rendering reworks lighting, materials and detail. With Quad Views, Extend NR to peripheral views applies it across the eye.',
+   expect:'Tune the image with Working scale, Intensity and Model style. Auto scale can lower the working scale or skip NR while output FPS is low.',
+   cost:'GPU time and video memory, especially at higher working scales.',
+   needs:'An NVIDIA RTX card, your own nvngx_dlssnr.dll and DCS upscaling set to DLSS. Auto scale uses Quad Views, pre-SR processing and Optiflow timing.'},
+  {section:'vr', page:'framegen', name:'Frame Generation', impact:'Smoother', hide:p => !vdxrVr(p), on:p => p.frameGen !== 'Off',
+   gives:'Optiflow adds frames between the ones DCS renders.',
+   expect:'Choose Optiflow, Optiflow + Depth or Optiflow Hybrid. Auto adjusts the multiplier as rendering load changes.',
+   cost:'GPU time and some latency. Higher multipliers generate more frames for each rendered frame.',
+   needs:'An NVIDIA RTX card. Depth and Hybrid use guides from DCS DLSS.'},
+  {section:'vr', page:'foveation', name:'Quad Views', impact:'More FPS', hide:vdxrVr, on:p => p.quadViews !== 'None',
    gives:'Full detail where you look, lower resolution around it.',
    expect:'Usually the biggest gain in VR. With eye tracking the sharp area follows your eyes and you rarely notice the edge.',
    cost:'A softer periphery, where thin lines can shimmer.',
    needs:'Eye tracking (Pimax Crystal) for a focus area that follows your eyes.'},
-  {section:'vr', page:'framegen', name:'Frame generation', impact:'Smoother', on:p => p.frameGen !== 'Off',
+  {section:'vr', page:'framegen', name:'Frame generation', impact:'Smoother', hide:vdxrVr, on:p => p.frameGen !== 'Off',
    gives:'Generated frames between the ones DCS renders, so the headset gets a frame at every refresh.',
    expect:'Smooth motion even when DCS can\'t keep up. With Auto and Only when needed (the default), DCS renders at the refresh rate and frames are generated only while it falls behind, so you get less latency whenever DCS keeps up.',
    cost:'A little latency while frames are generated (more in 3×); the mouse moves at DCS\'s own frame rate unless Smooth mouse cursor is on.',
    needs:'An NVIDIA RTX card, or FidelityFX on any card. Only when needed sets the DCS frame limit to the refresh rate unless you chose Custom or 300 FPS. With Engine Optimizations on, generated frames also use DCS\'s cockpit outline, depth and motion.'},
-  {section:'vr', page:'framegen', name:'Sharp HUD', impact:'Sharper HUD', on:p => p.frameGen !== 'Off' && p.frameGenHudSymbology && usesDepthBoost(p),
+  {section:'vr', page:'framegen', name:'Sharp HUD', impact:'Sharper HUD', hide:vdxrVr, on:p => p.frameGen !== 'Off' && p.frameGenHudSymbology && usesDepthBoost(p),
    gives:'HUD and helmet symbols stay sharp in generated frames instead of smearing.',
    expect:'A clean HUD while you turn. The symbols update at DCS\'s own HUD rate, about 20 times a second.',
    cost:'About 0.15 ms of GPU and 160 MB of video memory.',
    needs:'Frame generation and Depth boost.'},
-  {section:'vr', page:'dlss', name:'DLSS 5', impact:'New look', on:p => p.neuralRendering,
+  {section:'vr', page:'dlss', name:'DLSS 5', impact:'New look', hide:vdxrVr, on:p => p.neuralRendering,
    gives:'NVIDIA\'s neural rendering reworks the image; with Quad Views, only where you look.',
    expect:'A different, more natural look of light and materials. Pair it with frame generation to keep the motion smooth.',
    cost:'GPU time and video memory.',
    needs:'An NVIDIA RTX card, your own nvngx_dlssnr.dll and DCS\'s Upscaling set to DLSS. Checks shows how to keep the HUD sharp.',
    keyPath:'neuralToggleKey', keyText:'off and on'},
-  {section:'vr', page:'dlss', name:'Periphery DLSS preset', impact:'More FPS', on:p => usesPeripheryDlssPreset(p),
+  {section:'vr', page:'dlss', name:'Periphery DLSS preset', impact:'More FPS', hide:vdxrVr, on:p => usesPeripheryDlssPreset(p),
    gives:'A lighter DLSS model outside the focus area; the focus area stays as sharp as before.',
    expect:'About 0.3 ms faster per frame. The edge of view can shimmer a little more on head turns.',
    cost:'A little more shimmer at the edge of view.',
    needs:'Quad Views, Engine Optimizations and DCS\'s Upscaling set to DLSS.'},
-  {section:'vr', page:'osd', name:'Headset panel', impact:'Status', vr:true, on:p => !p.desktop && (p.frameGen !== 'Off' || p.headsetPanel),
+  {section:'vr', page:'osd', name:'Headset panel', impact:'Status', vr:true, hide:vdxrVr, on:p => !vdxrVr(p) && !p.desktop && (p.frameGen !== 'Off' || p.headsetPanel),
    gives:'A small panel in the headset: FPS and what each feature is doing right now.',
    expect:'A quick look to see that everything runs, and to compare features with their keys.',
    cost:'None.',
@@ -1922,7 +2403,7 @@ const FEATURE_GUIDE = [
    needs:'Quad Views with eye tracking.'},
   {section:'perception', page:'foveation', name:'Periphery stability', impact:'Calmer image', on:p => !p.desktop && p.peripheryStability && quad(p),
    gives:'Calms the shimmer of thin lines (canopy frame, power lines, the horizon) outside the sharp area.',
-   expect:'A quieter periphery; the sharp area is not touched.',
+   expect:'A quieter periphery around the sharp focus area.',
    cost:'Almost no GPU cost.',
    needs:'The bundled Quad Views.'},
   {section:'visual', page:'visual', name:'Color modes', impact:'Truer color', on:p => !p.desktop && p.colorMode !== 'Off',
@@ -1930,7 +2411,7 @@ const FEATURE_GUIDE = [
    expect:'Fix: deeper blacks, otherwise DCS\'s own look. Enhanced: warmer sunsets and more natural light and shadow.',
    cost:'0.05 ms (Fix), about 0.1 ms (Enhanced) plus night vision and glare.',
    keyPath:'colorModeKey', keyText:'Off, Fix, Enhanced'},
-  {section:'visual', page:'visual', name:'Panel color correction', impact:'Truer color', on:p => !p.desktop && p.colorMode !== 'Off' && Number(p.panelGamut) > 0,
+  {section:'visual', page:'visual', name:'Panel color correction', impact:'Truer color', hide:vdxrVr, on:p => !p.desktop && !vdxrVr(p) && p.colorMode !== 'Off' && Number(p.panelGamut) > 0,
    gives:'For the Crystal Super: corrects the over-saturated colors its wide-gamut panels give DCS\'s image.',
    expect:'Calmer, more natural colors. HUD and MFDs are not affected.',
    cost:'Almost no GPU cost: it runs in the color mode\'s own pass.',
@@ -1940,13 +2421,13 @@ const FEATURE_GUIDE = [
    expect:'Lights, lit instruments and the HUD keep their color. By day only the glare shows, around the sun and strong lights.',
    cost:'About 0.08 ms at night (night vision) and 0.1 ms (glare).',
    needs:'The Enhanced color mode.'},
-  {section:'visual', page:'visual', name:'Eye-focus blur', impact:'Depth cue', on:p => usesGazeDof(p),
+  {section:'visual', page:'visual', name:'Eye-focus blur', impact:'Depth cue', hide:vdxrVr, on:p => usesGazeDof(p),
    gives:'Things nearer or farther than where you look go slightly soft, like a real eye.',
    expect:'The panel softens while you look outside, the terrain while you read a display. Sharp again the moment your eyes move.',
    cost:'About 0.18 ms.',
    needs:'Quad Views with eye tracking.'},
   {section:'visual', page:'visual', name:'G vision', impact:'Realism', on:p => gVisionOn(p),
-   gives:'Under high G, color fades and vision closes in toward where you look, then goes black. Red-out under negative G.',
+   gives:'Under high G, color fades and vision closes in, then goes black. Red-out under negative G.',
    expect:'Works together with DCS\'s own G effect without doubling it.',
    cost:'About 0.04 ms, only while G is high.'},
   {section:'safety', page:'recovery', name:'Back to stock DCS', impact:'Undo all', on:() => false,
@@ -1967,7 +2448,7 @@ function renderGuide() {
   const box = $('featureGuide'); if (!box) return;
   const desktop = Boolean(profile?.desktop);
   const icon = id => pages.find(p => p[0] === id)?.[4] ?? '';
-  const shown = FEATURE_GUIDE.filter(g => !(desktop && (g.vr || VR_PAGES.includes(g.page))));
+  const shown = FEATURE_GUIDE.filter(g => g.section === 'screen' ? desktopEnhanced(profile) : !(desktop && (g.vr || VR_PAGES.includes(g.page))) && !(vdxrVr(profile) && g.section === 'perception') && !g.hide?.(profile));
   const card = g => {
     const on = Boolean(profile && g.on(profile)), index = shown.indexOf(g);
     const meta = [['Cost',g.cost],['Needs',g.needs]].filter(m => m[1]).map(([k,v]) => `<div><span>${k}</span><p>${escape(v)}</p></div>`).join('');
@@ -1980,10 +2461,13 @@ function renderGuide() {
       + `<div class="guide-meta">${meta}</div>`
       + `<footer>${key}<button class="link-button" data-guide-page="${index}">Open →</button></footer></article>`;
   };
-  const start = `<section class="guide-start${desktop ? ' two' : ''}" aria-label="Where to start">${(desktop ? GUIDE_START_DESKTOP : GUIDE_START).map(([n,t,d]) => `<div><b>${n}</b><div><h3>${t}</h3><p>${d}</p></div></div>`).join('')}</section>`;
+  const steps = desktopEnhanced(profile) ? [...GUIDE_START_DESKTOP,['3','Rendering','Choose super resolution and neural rendering, then add frame generation for smoother motion.']] : desktop ? GUIDE_START_DESKTOP : GUIDE_START;
+  const startSteps = vdxrVr(profile) ? [...steps.slice(0,2),['3','Then explore','Set your focus area and head tracking, then tune Super Resolution and Neural Rendering.']] : steps;
+  const start = `<section class="guide-start${startSteps.length === 2 ? ' two' : ''}" aria-label="Where to start">${startSteps.map(([n,t,d]) => `<div><b>${n}</b><div><h3>${t}</h3><p>${d}</p></div></div>`).join('')}</section>`;
   box.innerHTML = start + GUIDE_SECTIONS.map(([id,title,note]) => {
     const items = shown.filter(g => g.section === id); if (!items.length) return '';
-    return `<section class="guide-section"><div class="guide-section-head"><h2>${title}</h2>${note ? `<p>${note}</p>` : ''}</div><div class="guide-grid">${items.map(card).join('')}</div></section>`;
+    const description = id === 'vr' && vdxrVr(profile) ? 'Virtual Desktop headsets using VDXR.' : note;
+    return `<section class="guide-section"><div class="guide-section-head"><h2>${title}</h2>${description ? `<p>${description}</p>` : ''}</div><div class="guide-grid">${items.map(card).join('')}</div></section>`;
   }).join('');
   box.querySelectorAll('[data-guide-page]').forEach(b => b.addEventListener('click',() => navigate(shown[Number(b.dataset.guidePage)].page)));
 }
@@ -1991,11 +2475,11 @@ function renderGuide() {
 const TOUR = [
   {title:'Welcome to DCS Control', text:'It sets DCS up for your headset (or the monitor) and makes it run faster. This short tour shows where everything is. You can open it again from Help & support.'},
   {target:'#nav-guide', title:'Feature guide', text:'What each feature does, what to expect and what it costs, in a few lines each. A good place to start.'},
-  {target:'#routeSwitch', title:'How you fly', text:'Pick Pimax, Sboys (SteamVR), or Optimizations only for a monitor or another headset.'},
+  {target:'#routeSwitch', title:'How you fly', text:'Pick Pimax, Sboys (SteamVR) or VDXR (Virtual Desktop) for VR, Desktop Enhanced for neural rendering, super resolution and frame generation on a monitor, or Optimizations only to keep DCS rendering unchanged.'},
   {target:'#featureList', title:'What to turn on', text:'Tick the features you want. The arrow next to each one opens its settings.'},
   {target:'#nav-diagnostics', title:'Checks', text:'Before you fly, Checks lists anything to fix, with a button that takes you to the setting.'},
   {target:'#launch', title:'Launch DCS', text:'Always start DCS from here. It writes your profile into DCS first, then starts it.'},
-  {target:'#nav-osd', title:'Keys & headset panel', text:'Every in-flight key and what it does, with the headset panel. In the app: Ctrl+1 to Ctrl+0 open the pages, Ctrl+Shift+C opens Checks, Ctrl+K finds a setting.'},
+  {target:'#nav-osd', title:'In Flight', text:'Every in-flight key and what it does, with the headset panel. In the app: Ctrl+1 to Ctrl+0 open the pages, Ctrl+Shift+C opens Checks, Ctrl+K finds a setting.'},
   {target:'#nav-recovery', title:'Back to stock DCS', text:'One step puts DCS back exactly as it was before DCS Control.'}
 ];
 let tourStep = 0;
@@ -2221,12 +2705,12 @@ async function initialize() {
 initialize();
 /** Takes a profile and DCS paths chosen elsewhere (guided setup) as the draft, exactly like editing them here. */
 function adoptDraft(next) {
-  profile = clone(next.profile); invalid.clear(); rememberProvider(profile); if (next.dcs !== undefined) dcs = next.dcs ?? ''; if (next.options !== undefined) options = next.options ?? '';
+  profile = copyProfile(next.profile); invalid.clear(); rememberProvider(profile); if (next.dcs !== undefined) dcs = next.dcs ?? ''; if (next.options !== undefined) options = next.options ?? '';
   fields.forEach(f => { if (f.path === 'dcs') setFieldValue(f, dcs); else if (f.path === 'options') setFieldValue(f, options); });
   showProfile(); change(); boostChanged();
 }
 // Test hooks exercise the same controls and command bridge; the fixture host never starts DCS or opens dialogs.
-window.dcsUi = {request,run,renderDashboard,setBusy,askDxgiFirst,askDxgiFresh,checkUpdates,installUpdate,setUpdateChecks,notesFragment,get updates(){return updates;},saveRuntime,forgetRuntime,adoptDraft,launchState,checkItems,loadFlight,resetToApplied,parseKey,keyLabel,get flight(){return flight;},get savedDraft(){return savedDraftJson;},refreshWorkflow:() => { renderOriginals(); updateWorkflow(); renderDashboard(); },applyLive,get liveStatus(){return liveStatus;},runsWith,navigate,draft,sync,showProfile,invalidate:change,fields,withFeatures,featureState,featureNotes,featureSummary,deriveIdentity,FEATURES,ENGINE_PARTS,rereadPimax,refreshBoostPlan,renderBoostPlan,matchesApplied,effectiveFovea,revealSetting,get boostRequests(){return boostSequence;},engineShaderRows:(w,c) => { engineWarmup = w; engineCache = c; return shaderRows(); },get profile(){return profile;},get plan(){return plan;},get invalid(){return invalid;},get state(){return state;}};
+window.dcsUi = {request,run,renderDashboard,setBusy,askDxgiFirst,askDxgiFresh,checkUpdates,installUpdate,setUpdateChecks,notesFragment,get updates(){return updates;},saveRuntime,forgetRuntime,adoptDraft,launchState,checkItems,loadFlight,resetToApplied,parseKey,keyLabel,get flight(){return flight;},get savedDraft(){return savedDraftJson;},refreshWorkflow:() => { renderOriginals(); updateWorkflow(); renderDashboard(); },applyLive,get liveStatus(){return liveStatus;},runsWith,navigate,draft,sync,showProfile,invalidate:change,fields,withFeatures,resolveFeatures,featureState,featureNotes,featureSummary,deriveIdentity,FEATURES,ENGINE_PARTS,rereadPimax,refreshBoostPlan,renderBoostPlan,matchesApplied,effectiveFovea,revealSetting,get boostRequests(){return boostSequence;},engineShaderRows:(w,c) => { engineWarmup = w; engineCache = c; return shaderRows(); },get profile(){return profile;},get plan(){return plan;},get invalid(){return invalid;},get state(){return state;}};
 // More / Less: shows or hides a setting's (or a card's) detail text; every page load starts with it folded.
 document.addEventListener('click', e => {
   const b = e.target.closest('.more-toggle'); if (!b) return; const detail = $(b.getAttribute('aria-controls')); if (!detail) return;
@@ -2244,14 +2728,15 @@ document.addEventListener('click', e => {
   const route = e.target.closest('#routeSwitch [data-route]');
   if (!route || busy) return;
   const target = route.dataset.route;
-  if (target === 'Desktop') {
-    if (profile.desktop) return;
-    // Optimizations only: the VR settings stay in the profile and come back with the Pimax or Sboys route.
+  if (target === 'Desktop' || target === 'DesktopEnhanced') {
+    if (profile.desktop && Boolean(profile.desktopEnhanced) === (target === 'DesktopEnhanced')) return;
+    // Both desktop routes keep the VR settings for the next Pimax or Sboys flight.
     profile.desktop = true;
+    profile.desktopEnhanced = target === 'DesktopEnhanced';
   } else {
     if (!profile.desktop && target === profile.runtime) return;
     profile.desktop = false;
-    // Switching route keeps every feature and setting; Pimax native Quad Views becomes the bundled provider on Sboys.
+    // Pimax native Quad Views becomes the bundled provider on other runtime routes.
     if (target !== profile.runtime) { profile.runtime = target; profile.runtimeManifestPath = null; }
   }
   resolveFeatures(profile); Object.assign(profile, deriveIdentity(profile));
@@ -2276,7 +2761,7 @@ $('cancelDetect').addEventListener('click', () => $('detectDialog').close());
 $('confirmDetect').addEventListener('click', () => {
   $('detectDialog').close(); if (!detectedProfile) return;
   if (state && detectedRefresh !== undefined) state.headsetRefresh = detectedRefresh;
-  profile = clone(detectedProfile); detectedProfile = null; invalid.clear(); rememberProvider(profile); showProfile(); change(); boostChanged();
+    profile = copyProfile(detectedProfile); detectedProfile = null; invalid.clear(); rememberProvider(profile); showProfile(); change(); boostChanged();
 });
 // Orange fill on slider tracks, as in the launcher.
 function paintRange(range) { const min = Number(range.min), max = Number(range.max), value = Number(range.value); range.style.setProperty('--fill', (max > min ? (value - min) / (max - min) * 100 : 0) + '%'); }

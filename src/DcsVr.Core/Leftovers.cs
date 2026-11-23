@@ -94,6 +94,12 @@ public static class Leftovers
         }
         foreach (var dcs in Existing(savedGamesDcsFolders))
         {
+            foreach (var filename in new[] { "DcsRender.lua", "DcsRender.dll" })
+            {
+                var adapter = Path.Combine(dcs, "Scripts", "Hooks", filename);
+                if (Own(adapter)) Add(adapter, filename.EndsWith(".lua", StringComparison.OrdinalIgnoreCase)
+                    ? "Rendering lifecycle hook, installed by DCS Control" : "Rendering lifecycle adapter, installed by DCS Control");
+            }
             var module = Path.Combine(dcs, "Scripts", "DcsQvCull");
             var parts = new[] { Path.Combine(dcs, "Scripts", "Hooks", "DcsQvCull.lua"), Path.Combine(module, "DcsQvCull.dll"), Path.Combine(module, "payload", "DcsQvCullPayload.dll") }.Where(Own).ToArray();
             foreach (var part in parts) Add(part, part.EndsWith(".lua", StringComparison.OrdinalIgnoreCase) ? "Engine Optimizations hook, installed by DCS Control" : "Engine Optimizations module, installed by DCS Control");

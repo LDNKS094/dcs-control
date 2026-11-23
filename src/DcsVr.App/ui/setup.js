@@ -15,7 +15,7 @@
     const draft = ui().draft(); paths = {dcs:draft.dcs,options:draft.options,neuralRuntimePath:source.neuralRuntimePath || ''};
     const running = ui().state?.activeRoute?.route;
     // The same features as the checklist on the Overview, starting from the current draft.
-    choices = {route:source.desktop ? 'Desktop' : running || source.runtime,features:ui().featureState(source),gaze:source.gaze};
+    choices = {route:source.desktop ? source.desktopEnhanced ? 'DesktopEnhanced' : 'Desktop' : running || source.runtime,features:ui().featureState(source),gaze:source.gaze};
     message(''); render(); el('setupDialog').showModal();
   }
   /** The candidate profile for the current choices; quality values are kept, the alternative Quad Views folder is cleared. */
@@ -29,9 +29,10 @@
   function renderChoose() {
     const preview = plan(), notes = ui().featureNotes(preview), on = ui().featureState(preview);
     el('setupFeatures').innerHTML = ui().FEATURES.map(([key,title]) => `<label class="setup-feature ${on[key] ? 'on' : ''}"><input type="checkbox" id="setupFeature-${key}" data-feature="${key}" ${choices.features[key] ? 'checked' : ''}><span><b>${title}</b><small>${text(ui().featureSummary(key,preview))}</small>${notes[key].map(n => `<em class="${n[0]}">${text(n[1])}</em>`).join('')}</span></label>`).join('');
-    el('setupGazeRow').hidden = !choices.features.quad || choices.route === 'Desktop';
-    // Optimizations only: only Engine Optimizations and CPU Boost are offered.
-    for (const [key] of ui().FEATURES) if (!['engine','boost'].includes(key)) el('setupFeature-'+key).closest('.setup-feature').hidden = choices.route === 'Desktop';
+    const desktop = choices.route === 'Desktop' || choices.route === 'DesktopEnhanced';
+    el('setupGazeRow').hidden = !choices.features.quad || desktop || choices.route === 'Vdxr';
+    // Screen NR/SR/FG use independent settings; Quad Views stays VR-only.
+    for (const [key] of ui().FEATURES) el('setupFeature-'+key).closest('.setup-feature').hidden = key === 'sr' ? choices.route !== 'DesktopEnhanced' && choices.route !== 'Vdxr' : desktop && !['engine','boost',...(choices.route === 'DesktopEnhanced' ? ['dlss','framegen'] : [])].includes(key);
   }
   function checkItem(c) {
     return `<article class="readiness-item ${text(c.state)}"><span class="check-mark">${c.state === 'Pass' ? '✓' : c.state === 'Error' ? '!' : '?'}</span><div><b>${text(c.title)}</b><p>${text(c.detail)}</p>${c.guide && !['paths','recovery'].includes(c.guide) ? `<button class="guide-link" data-guide="${text(c.guide)}">Official setup guide ↗</button>` : ''}</div></article>`;
@@ -46,9 +47,17 @@
     const body = el('setupBody');
     if (step === 0) {
       const live = ui().state?.activeRoute;
-      body.innerHTML = `<h3>What do you want to fly with?</h3><p>Your quality settings stay as they are. Only the route and the active features change.</p><div class="setup-grid"><label>How you fly<select id="setupRoute">${opts([['Pimax','Pimax (Pimax Play)'],['SboysSteamVr','Sboys (SteamVR)'],['Desktop','Optimizations only (monitor or any other headset)']],choices.route)}</select><small class="setup-hint">${text(live?.summary || '')}</small></label><label id="setupGazeRow">Focus movement<select id="setupGaze">${opts([['EyeTracked','Eye tracked'],['Fixed','Fixed (centered)']],choices.gaze)}</select></label></div><div class="setup-features" id="setupFeatures" role="group" aria-label="Features"></div>`;
+      body.innerHTML = `<h3>What do you want to fly with?</h3><p>Choose the active features here. Launch DCS applies the settings; the screen and VR rendering choices stay separate.</p><div class="setup-grid"><label>How you fly<select id="setupRoute">${opts([['Pimax','Pimax (Pimax Play)'],['SboysSteamVr','Sboys (SteamVR)'],['Vdxr','VDXR (Virtual Desktop)'],['DesktopEnhanced','Desktop Enhanced (monitor rendering)'],['Desktop','Optimizations only (monitor or any other headset)']],choices.route)}</select><small class="setup-hint">${text(live?.summary || '')}</small></label><label id="setupGazeRow">Focus movement<select id="setupGaze">${opts([['EyeTracked','Eye tracked'],['Fixed','Fixed (centered)']],choices.gaze)}</select></label></div><div class="setup-features" id="setupFeatures" role="group" aria-label="Features"></div>`;
       renderChoose();
-      for (const [id,key] of [['setupRoute','route'],['setupGaze','gaze']]) el(id).addEventListener('change',e => { choices[key] = e.target.value; renderChoose(); });
+      for (const [id,key] of [['setupRoute','route'],['setupGaze','gaze']]) el(id).addEventListener('change',e => {
+        choices[key] = e.target.value;
+        if (key === 'route') {
+          const p = {...source,desktop:['Desktop','DesktopEnhanced'].includes(choices.route),desktopEnhanced:choices.route === 'DesktopEnhanced'};
+          if (!p.desktop) p.runtime = choices.route;
+          const on = ui().featureState(ui().resolveFeatures(p)); for (const k of ['quad','dlss','sr','framegen']) choices.features[k] = on[k];
+        }
+        renderChoose();
+      });
       el('setupFeatures').addEventListener('change',e => { const key = e.target.dataset?.feature; if (!key) return; choices.features[key] = e.target.checked; renderChoose(); el('setupFeature-'+key).focus(); });
     } else if (step === 1) {
       const errors = report?.checks.filter(c => c.state === 'Error') || [], warnings = report?.checks.filter(c => c.state === 'Warning') || [], passed = report?.checks.filter(c => c.state === 'Pass') || [];

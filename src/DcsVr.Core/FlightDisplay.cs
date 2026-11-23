@@ -135,6 +135,24 @@ public sealed class FlightDisplay(IDisplayModes displays, string markerPath)
 /// <see cref="Reset"/> are used only by the boost helper and the leftover restore.</summary>
 public sealed class WindowsDisplayModes : IDisplayModes
 {
+    public sealed record Output(string Id, string Name, int Width, int Height, int Refresh, IReadOnlyList<DisplayMode> Modes);
+
+    public IReadOnlyList<Output> Outputs()
+    {
+        var result = new List<Output>();
+        var device = NewDevice();
+        for (uint i = 0; EnumDisplayDevicesW(null, i, ref device, 0); i++, device = NewDevice())
+        {
+            if ((device.StateFlags & DISPLAY_DEVICE_ATTACHED_TO_DESKTOP) == 0) continue;
+            var current = Current(device.DeviceName)!;
+            var output = new Output(device.DeviceName, Name(device.DeviceName), current.Width, current.Height, current.Refresh,
+                Modes(device.DeviceName).DistinctBy(m => (m.Width, m.Height)).ToArray());
+            if ((device.StateFlags & DISPLAY_DEVICE_PRIMARY_DEVICE) != 0) result.Insert(0, output);
+            else result.Add(output);
+        }
+        return result;
+    }
+
     public string? PrimaryDevice()
     {
         var device = NewDevice();

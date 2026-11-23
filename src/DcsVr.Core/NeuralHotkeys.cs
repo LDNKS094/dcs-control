@@ -36,6 +36,10 @@ public static class NeuralHotkeys
     /// <summary>Ctrl+Alt+F8 to F12 and Ctrl+Alt+Page Up/Down, with or without Shift: the engine optimizations module's
     /// own keys (its test suite, for one, starts on Ctrl+Alt+F11 whatever else is held).</summary>
     public static bool EngineModuleKey(Hotkey key) => (key.Modifiers & 3) == 3 && key.VirtualKey is >= 0x77 and <= 0x7B or 0x21 or 0x22;
+
+    public static bool IsMenuShortcut(Hotkey key, bool desktop) => key.VirtualKey is >= 8 and <= 254
+        and not (0x10 or 0x11 or 0x12 or 0x14 or 0x1B or 0x5B or 0x5C or 0xE5 or >= 0xA0 and <= 0xA5)
+        && (desktop ? key.Modifiers is >= 0 and <= 3 : key.Modifiers == 0);
     /// <summary>The fixed choices of earlier versions, checked free in DCS's default keyboard bindings and the user's own
     /// bindings on 2026-10-04. Profiles may still hold these labels.</summary>
     public static IReadOnlyDictionary<string, (int VirtualKey, int Modifiers)> All { get; } = new Dictionary<string, (int, int)>(StringComparer.OrdinalIgnoreCase)

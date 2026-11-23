@@ -68,7 +68,10 @@ public static class SetupDetection
         }
         if (sources.ProcessRunning("pi_server"))
             return new(null, "Pimax Play is running and SteamVR is not. Use the Pimax route, or start SteamVR first for Sboys.", TrackingKind.Unknown);
-        return new(null, "No running headset software was detected. Start Pimax Play, or SteamVR with Sboys, then detect again.", TrackingKind.Unknown);
+        // A running Streamer is installation evidence, not proof that a headset is connected.
+        if (sources.ProcessRunning("VirtualDesktop.Streamer"))
+            return new(null, "Virtual Desktop Streamer is running. Select VDXR and connect the headset in Virtual Desktop.", TrackingKind.Unknown);
+        return new(null, "No running headset software was detected. Start the software for the selected headset route, then detect again.", TrackingKind.Unknown);
     }
 
     public static SetupDetectionResult Detect(VrProfile current, InventorySnapshot inventory, DetectionSources? sources = null)
@@ -80,7 +83,11 @@ public static class SetupDetection
         void Set(string field, string label, string value, string source) => detected.Add(new(field, label, value, source));
 
         var active = DetectActiveRoute(sources);
-        if (active.Route is { } route)
+        if (current.UsesOptiScaler)
+            notes.Add("Desktop Enhanced stays selected for monitor rendering.");
+        else if (current.Runtime == RuntimeKind.Vdxr && !current.Desktop)
+            notes.Add("VDXR stays selected. Connect Quest 3 in Virtual Desktop and select the matching headset refresh rate here.");
+        else if (active.Route is { } route)
         {
             // A running Pimax or SteamVR route is what this PC flies with: it replaces Optimizations only, whose VR settings
             // were kept in the profile and come back with it.
@@ -93,12 +100,19 @@ public static class SetupDetection
             if (current.Desktop) notes.Add("Optimizations only stays selected: no Pimax or SteamVR runtime is running.");
         }
 
-        var tracking = active.Tracking != TrackingKind.Unknown ? active.Tracking : inventory.Tracking;
+        if (profile.Runtime == RuntimeKind.Vdxr)
+        {
+            profile = profile with { Tracking = TrackingKind.Slam, Gaze = GazeMode.Fixed, FoveaSource = FoveaSource.Profile, RefreshFromHeadset = false,
+                QuadViews = profile.QuadViews == QuadProvider.None ? QuadProvider.None : QuadProvider.CheekyNative };
+            Set("gaze", "Focus movement", "Fixed", "Quest 3 uses the focus area saved in this profile");
+            Set("headsetRefreshHz", "Headset refresh rate", profile.HeadsetRefreshHz.ToString("0.#", CultureInfo.InvariantCulture) + " Hz", "Set this value to the VR frame rate selected in Virtual Desktop");
+        }
+        var tracking = profile.Runtime == RuntimeKind.Vdxr ? TrackingKind.Slam : active.Tracking != TrackingKind.Unknown ? active.Tracking : inventory.Tracking;
         if (tracking != TrackingKind.Unknown)
         {
             profile = profile with { Tracking = tracking };
-            Set("tracking", "Headset tracking", tracking == TrackingKind.Slam ? "SLAM (Pimax EVO)" : "Lighthouse",
-                active.Tracking != TrackingKind.Unknown ? "Sboys headset serial in the SteamVR log" : "Detected installation");
+            Set("tracking", "Headset tracking", tracking == TrackingKind.Slam ? "SLAM" : "Lighthouse",
+                profile.Runtime == RuntimeKind.Vdxr ? "Quest 3 tracking" : active.Tracking != TrackingKind.Unknown ? "Sboys headset serial in the SteamVR log" : "Detected installation");
         }
 
         if (profile.QuadViews != QuadProvider.None)
@@ -134,13 +148,13 @@ public static class SetupDetection
             Set("headsetRefreshHz", "Headset refresh rate", refresh.ToString("0.#", CultureInfo.InvariantCulture) + " Hz", "SteamVR preferred refresh rate (confirm it matches the headset)");
         }
 
-        if (profile.QuadViews == QuadProvider.QuadViewsFoveated && string.IsNullOrWhiteSpace(profile.QuadViewsLayerDirectory) && PimaxFovea.Read(sources.PimaxPlaySettings) is { Preset: true } preset)
+        if (profile.Runtime != RuntimeKind.Vdxr && profile.QuadViews == QuadProvider.QuadViewsFoveated && string.IsNullOrWhiteSpace(profile.QuadViewsLayerDirectory) && PimaxFovea.Read(sources.PimaxPlaySettings) is { Preset: true } preset)
         {
             // A Pimax preset's values cannot be read: the profile keeps its own focus values.
             Set("foveaSource", "Focus area source", "Pimax preset " + preset.PresetName + ": this profile's own values", sources.PimaxPlaySettings);
             notes.Add(PimaxFovea.PresetNote(preset));
         }
-        else if (profile.QuadViews == QuadProvider.QuadViewsFoveated && string.IsNullOrWhiteSpace(profile.QuadViewsLayerDirectory) && PimaxFovea.Read(sources.PimaxPlaySettings) is { } quad)
+        else if (profile.Runtime != RuntimeKind.Vdxr && profile.QuadViews == QuadProvider.QuadViewsFoveated && string.IsNullOrWhiteSpace(profile.QuadViewsLayerDirectory) && PimaxFovea.Read(sources.PimaxPlaySettings) is { } quad)
         {
             // The focus area follows Pimax Play (read again at every launch); the converted values are also stored so
             // the profile keeps them if the source is later switched to "This profile".

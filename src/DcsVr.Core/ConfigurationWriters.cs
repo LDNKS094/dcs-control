@@ -18,10 +18,10 @@ public static class ConfigurationWriters
     public static string Cheeky(VrProfile p) => $"""
         [CheekyFoveatedDLSS]
         SchemaVersion=1
-        Enabled={(p.UsesFoveatedDlss ? 1 : 0)}
-        D3D11D3D12Transport={(p.NeuralRendering ? 1 : 0)}
+        Enabled={(p.UsesFoveatedDlss || p.UsesVdxrCenterSr ? 1 : 0)}
+        D3D11D3D12Transport={(p.NeuralRendering || p.UsesCheekyFrameGeneration || p.UsesVdxrCenterSr ? 1 : 0)}
         D3D12LowerHook=1
-        PeripheralDlaa={(p.UsesQuadFocus ? 0 : 1)}
+        PeripheralDlaa={(p.UsesQuadFocus || p.Runtime == RuntimeKind.Vdxr ? 0 : 1)}
         PeripheralDlaaScale={Number(CheekyRange(p.PeripheralScale))}
         Width={Number(p.UsesQuadFocus ? 1 : CheekyRange(p.FoveaWidth))}
         Height={Number(p.UsesQuadFocus ? 1 : CheekyRange(p.FoveaHeight))}
@@ -37,10 +37,11 @@ public static class ConfigurationWriters
         NrWidth={Number(p.UsesQuadFocus ? NeuralArea(p) : CheekyRange(p.FoveaWidth))}
         NrHeight={Number(p.UsesQuadFocus ? NeuralArea(p) : CheekyRange(p.FoveaHeight))}
         NrRoundness={((p.UsesNeuralEdgeFade || p.UsesCentralNeuralArea) && p.QuadRoundFocus ? 1 : 0)}
-        CenterPreset={Int(p.UsesQuadFocus ? p.FocusDlssPreset : 0)}
+        CenterPreset={Int(p.UsesVdxrCenterSr ? p.VdxrCenterPreset : p.UsesQuadFocus ? p.FocusDlssPreset : 0)}
         NrTransitionWidth={Number(p.UsesNeuralEdgeFade ? p.NeuralEdgeFeather : VrProfile.NeuralAreaFeather)}
         NrProcessingOrder={(p.NeuralBeforeUpscaling ? 1 : 0)}
         NrWorkingScale={Number(p.NeuralWorkingScale)}
+        {(p.Runtime == RuntimeKind.Vdxr ? $"NrPreset={Int(p.VdxrNrPreset)}" : "")}
         NrIntensity={Number(p.NeuralIntensity)}
         NrLocalToneStrength={Number(p.NeuralLocalTone)}
         NrLocalStructureStrength={Number(p.NeuralLocalStructure)}
@@ -54,8 +55,52 @@ public static class ConfigurationWriters
         NrMotionScaleYMultiplier={Number(p.NeuralMotionScaleY)}
         NrStyle={Int((int)p.NeuralStyle)}
         NrAutomaticMask={(p.NeuralAutomaticMask ? 1 : 0)}
+        {VdxrFocus(p)}
+        {CheekyFrameGeneration(p)}
 
         """;
+
+    private static string VdxrFocus(VrProfile p) => !p.UsesVdxrQuadViews ? "" : $"""
+        QuadFocusWidth={Int(p.VdxrFocusWidth)}
+        QuadFocusHeight={Int(p.VdxrFocusHeight)}
+        QuadCustomBlend={(p.VdxrFocusCustomBlend ? 1 : 0)}
+        QuadCornerRadius={Int(p.VdxrFocusCornerRadius)}
+        QuadEdgeFeather={Int(p.VdxrFocusFeather)}
+        QuadColorMatch={(p.VdxrFocusMatchColor ? 1 : 0)}
+        QuadMatchStereoBorders={(p.VdxrFocusMatchStereo ? 1 : 0)}
+        QuadStereoDistanceM={Number(p.VdxrFocusReferenceDistance)}
+        CenterSupersampling={Number(p.VdxrCenterSupersampling)}
+        QuadAutomaticSr={(p.UsesVdxrCenterSr && p.VdxrAutomaticSr ? 1 : 0)}
+        QuadQualityTargetPercent={Int(p.VdxrSrThreshold)}
+        QuadAutomaticNr={(p.NeuralRendering && p.NeuralBeforeUpscaling && p.VdxrAutomaticNr ? 1 : 0)}
+        QuadNrTargetPercent={Int(p.VdxrNrThreshold)}
+        QuadHeadOffset={(p.VdxrFocusHeadOffset ? 1 : 0)}
+        QuadFocusHorizontalBias={Number(p.VdxrFocusHorizontalBias)}
+        QuadFocusHorizontalAngleGain={Number(p.VdxrFocusHorizontalAngleGain)}
+        QuadFocusHorizontalDeadzone={Number(p.VdxrFocusHorizontalDeadzone)}
+        QuadFocusVerticalBias={Number(p.VdxrFocusVerticalBias)}
+        QuadFocusVerticalAngleGain={Number(p.VdxrFocusVerticalAngleGain)}
+        QuadFocusVerticalDeadzone={Number(p.VdxrFocusVerticalDeadzone)}
+        """;
+
+    // After quad composition, the whole-eye pass uses Cheeky's center method.
+    private static string CheekyFrameGeneration(VrProfile p) => p.Runtime != RuntimeKind.Vdxr ? "" : $"""
+        FgEnabled={(p.UsesCheekyFrameGeneration ? 1 : 0)}
+        FgMultiplier={(p.FrameGenFactor == VrProfile.FrameGenAuto ? 2 : p.FrameGenFactor)}
+        FgAutoMultiplier={(p.FrameGenFactor == VrProfile.FrameGenAuto ? 1 : 0)}
+        FgCenterMethod={Int(CheekyFrameGenerationMethod(p))}
+        FgFoveated=0
+        QuadPrecompose=1
+        FgTargetRefreshHz={Number(p.HeadsetRefreshHz)}
+        """;
+
+    private static int CheekyFrameGenerationMethod(VrProfile p)
+    {
+        int method = (int)p.VdxrFrameGenMethod;
+        if (p.VdxrFrameGenMethod != VdxrFrameGeneration.OptiflowHybrid) return method;
+        // Cheeky's Hybrid IDs encode depth guidance and splat in the low two bits.
+        return method | (p.VdxrFgDepthGuidance ? 1 : 0) | (p.VdxrFgDepthSplat ? 2 : 0);
+    }
 
     /// <summary>[PupilShift] PublishGaze, written only while Visual realism needs the gaze (eye-focus blur, G vision
     /// following the eyes): with it off the layer's file stays as it was.</summary>
@@ -120,7 +165,7 @@ public static class ConfigurationWriters
     /// file stays as it was before Visual realism existed.</summary>
     private static string ColorModeLine(VrProfile p) => p.UsesColorMode ? $"""
 
-        Mode={Int((int)p.ColorMode)}{(p.PanelGamut != 0 ? "\nPanelGamut=" + Int(p.PanelGamut) : "")}
+        Mode={Int((int)p.ColorMode)}{(p.Runtime != RuntimeKind.Vdxr && p.PanelGamut != 0 ? "\nPanelGamut=" + Int(p.PanelGamut) : "")}
         """ : "";
 
     /// <summary>Visual realism's sections after [Color]: each color mode's values while a color mode can run, [VrFx] while
@@ -172,7 +217,7 @@ public static class ConfigurationWriters
         GazeDofPupilMm={Number(p.GazeDofPupilMm)}
         GVision={(p.UsesGVision ? 1 : 0)}
         GVisionStrength={Number(p.GVisionStrength)}
-        GVisionUseGaze={(p.GVisionUseGaze ? 1 : 0)}
+        GVisionUseGaze={(p.Runtime != RuntimeKind.Vdxr && p.GVisionUseGaze ? 1 : 0)}
         GVisionRedout={(p.GVisionRedout ? 1 : 0)}
         GVisionTolerance={Number(p.GVisionTolerance)}
         GVisionMode={Int((int)p.GVisionMode)}

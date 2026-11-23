@@ -19,11 +19,21 @@ public static class ProfileValidation
     /// Views, Cheeky always runs through the focus adapter.</summary>
     public static VrProfile ResolveFeatures(VrProfile profile)
     {
+        // Quest 3 uses a fixed focus region and the refresh rate selected in Virtual Desktop.
+        if (profile.Runtime == RuntimeKind.Vdxr) profile = profile with { Gaze = GazeMode.Fixed, FoveaSource = FoveaSource.Profile, RefreshFromHeadset = false,
+        QuadViews = profile.QuadViews == QuadProvider.None ? QuadProvider.None : QuadProvider.CheekyNative, FoveatedDlss = false,
+            FrameGen = profile.FrameGen == FrameGeneration.Off ? FrameGeneration.Off : FrameGeneration.Nvidia };
+        else if (profile.QuadViews == QuadProvider.CheekyNative) profile = profile with { QuadViews = QuadProvider.QuadViewsFoveated };
         // Optimizations only keeps the VR settings for the next VR flight; VrProfile.ForLaunch is what runs.
         if (profile.FoveatedDlss && profile.QuadViews != QuadProvider.None) profile = profile with { FoveatedDlss = false };
-        if (profile.QuadViews == QuadProvider.PimaxNative && (profile.Runtime == RuntimeKind.SboysSteamVr || profile.UsesCheeky))
+        if (profile.QuadViews == QuadProvider.PimaxNative && (profile.Runtime != RuntimeKind.Pimax || profile.UsesCheeky))
             profile = profile with { QuadViews = QuadProvider.QuadViewsFoveated };
-        return profile with { QuadFocusAdapter = profile.UsesCheeky && profile.QuadViews == QuadProvider.QuadViewsFoveated };
+        return profile with
+        {
+            QuadFocusAdapter = profile.UsesCheeky && profile.QuadViews == QuadProvider.QuadViewsFoveated,
+            VdxrFocusHorizontalBias = Math.Clamp(profile.VdxrFocusHorizontalBias, -VrProfile.VdxrFocusMaxBias, VrProfile.VdxrFocusMaxBias),
+            VdxrFocusVerticalBias = Math.Clamp(profile.VdxrFocusVerticalBias, -VrProfile.VdxrFocusMaxBias, VrProfile.VdxrFocusMaxBias)
+        };
     }
 
     /// <summary>options.lua inside Saved Games\DCS*\Config, the only place DCS reads it from.</summary>
@@ -66,6 +76,25 @@ public static class ProfileValidation
         Range("quad-sharpening", profile.QuadSharpening, 0, 1);
         Range("quad-periphery-contrast", profile.QuadPeripheryContrast, 0, 1);
         Range("quad-edge-blend", profile.QuadEdgeBlend, 0, .5);
+        Range("vdxr-focus-width", profile.VdxrFocusWidth, 25, 100);
+        Range("vdxr-focus-height", profile.VdxrFocusHeight, 25, 100);
+        Range("vdxr-focus-corner-radius", profile.VdxrFocusCornerRadius, 0, 50);
+        Range("vdxr-focus-feather", profile.VdxrFocusFeather, 0, 50);
+        Range("vdxr-focus-reference-distance", profile.VdxrFocusReferenceDistance, .25, 10);
+        Range("vdxr-center-supersampling", profile.VdxrCenterSupersampling, 1, 2);
+        if (!VrProfile.FocusDlssPresets.Contains(profile.VdxrCenterPreset))
+            Error("vdxr-center-preset", "Select a center DLSS preset.");
+        Range("vdxr-sr-threshold", profile.VdxrSrThreshold, 50, 90);
+        Range("vdxr-nr-preset", profile.VdxrNrPreset, 0, 2);
+        Range("vdxr-nr-threshold", profile.VdxrNrThreshold, 50, 90);
+        if (!Enum.IsDefined(profile.VdxrFrameGenMethod))
+            Error("vdxr-framegen-method", "Select an Optiflow method.");
+        Range("vdxr-focus-horizontal-bias", profile.VdxrFocusHorizontalBias, -VrProfile.VdxrFocusMaxBias, VrProfile.VdxrFocusMaxBias);
+        Range("vdxr-focus-horizontal-angle-gain", profile.VdxrFocusHorizontalAngleGain, -1, 1);
+        Range("vdxr-focus-horizontal-deadzone", profile.VdxrFocusHorizontalDeadzone, 0, 10);
+        Range("vdxr-focus-vertical-bias", profile.VdxrFocusVerticalBias, -VrProfile.VdxrFocusMaxBias, VrProfile.VdxrFocusMaxBias);
+        Range("vdxr-focus-vertical-angle-gain", profile.VdxrFocusVerticalAngleGain, -1, 1);
+        Range("vdxr-focus-vertical-deadzone", profile.VdxrFocusVerticalDeadzone, 0, 10);
         Range("periphery-stability-strength", profile.PeripheryStabilityStrength, 0, 1);
         Range("neural-scale", profile.NeuralWorkingScale, .1, 1);
         Range("neural-intensity", profile.NeuralIntensity, 0, 1);
@@ -86,9 +115,11 @@ public static class ProfileValidation
         if (!Enum.IsDefined(profile.FpsLimit)) Error("fps-mode", "Select a recognized DCS frame limit.");
         Range("refresh-rate", profile.HeadsetRefreshHz, 50, 240);
         Range("rendered-fps-cap", profile.RenderedFpsCap, 30, 300);
-        if (profile.Runtime == RuntimeKind.SboysSteamVr && profile.QuadViews == QuadProvider.PimaxNative)
+        if (profile.Runtime != RuntimeKind.Vdxr && profile.QuadViews == QuadProvider.CheekyNative)
+            Error("quad-runtime", "Backend Quad Views is available on the VDXR route.");
+        if (profile.Runtime != RuntimeKind.Pimax && profile.QuadViews == QuadProvider.PimaxNative)
             Error("quad-runtime", "Pimax native Quad Views works only on the Pimax route. Select Bundled Quad Views as the Quad Views provider, or switch the route to Pimax.");
-        if (profile.UsesCheeky && profile.QuadViews != QuadProvider.None && !profile.UsesQuadFocus)
+        if (profile.Runtime != RuntimeKind.Vdxr && profile.UsesCheeky && profile.QuadViews != QuadProvider.None && !profile.UsesQuadFocus)
             Error("quad-cheeky", "DLSS 5 with Quad Views needs Bundled Quad Views as the Quad Views provider.");
         if (profile.UsesQuadFocus && !string.IsNullOrWhiteSpace(profile.QuadViewsLayerDirectory))
             Error("quad-adapter-provider", "DLSS 5 with Quad Views needs the bundled Quad Views provider. Clear the Alternative Quad Views provider folder.");
@@ -201,7 +232,7 @@ public static class ProfileValidation
             Error("visual-gazeDofPupilMm", "Pupil size must be 0 (automatic) or 2 to 8 mm.");
         Visual(nameof(VrProfile.GVisionStrength), profile.GVisionStrength, 0, 1);
         Visual(nameof(VrProfile.GVisionTolerance), profile.GVisionTolerance, 4, 10, " G");
-        if (profile.GazeDof && !profile.Desktop && !profile.UsesGazeDof)
+        if (profile.GazeDof && !profile.Desktop && profile.Runtime != RuntimeKind.Vdxr && !profile.UsesGazeDof)
             issues.Add(new("visual-gaze", IssueSeverity.Warning, "Eye-focus blur needs Quad Views with an eye-tracked focus area, because it reads your gaze from it. With these settings it does not run."));
         if (profile.EngineOptimizations && !Enum.IsDefined(profile.BoostPrefetch)) Error("engine-prefetch", "Select a recognized terrain prefetch fix mode.");
         if (profile.EngineOptimizations && profile.EngineTimerRefreshUs is < VrProfile.EngineTimerRefreshMin or > VrProfile.EngineTimerRefreshMax)
@@ -228,10 +259,14 @@ public static class ProfileValidation
             Error("monitor-mode", "Select a monitor mode from the list for Lower the monitor while flying.");
         if (profile.QuadViews == QuadProvider.QuadViewsFoveated && string.IsNullOrWhiteSpace(profile.QuadViewsLayerDirectory) && (profile.FoveaWidth > .9 || profile.FoveaHeight > .9))
             issues.Add(new("quad-coverage-cap", IssueSeverity.Warning, "Bundled Quad Views renders a focus area of at most 90% of the view in each direction, which is Horizontal and Vertical FOV 10% in Pimax Play's Quick units. Lower values stay in the profile but are rendered as 10%."));
-        if (profile.FrameGenFactor is not (VrProfile.FrameGenAuto or 2 or 3))
-            Error("framegen-factor", "Select Auto, 2× or 3× for Generated frames.");
+        if (profile.FrameGenFactor is not (VrProfile.FrameGenAuto or 2 or 3) && !(profile.Runtime == RuntimeKind.Vdxr && profile.FrameGenFactor == 4))
+            Error("framegen-factor", profile.Runtime == RuntimeKind.Vdxr ? "Select Auto, 2×, 3× or 4× for Generated frames." : "Select Auto, 2× or 3× for Generated frames.");
         // In-flight keys: any key with Ctrl/Alt/Shift (or an F-key, Pause, Scroll Lock … alone). A key DCS binds by
         // default still works, so it is a warning; the two keys must differ when both are in use.
+        var menuKey = profile.UsesOptiScaler ? profile.DesktopMenuKey
+            : !profile.Desktop && profile.Runtime == RuntimeKind.Vdxr ? profile.VdxrMenuKey : null;
+        if (menuKey is not null && (!NeuralHotkeys.TryParse(menuKey, out var menu) || !NeuralHotkeys.IsMenuShortcut(menu, profile.UsesOptiScaler)))
+            Error("ingame-menu-key", profile.UsesOptiScaler ? "Record a menu key with optional Ctrl or Alt." : "Record a single key for the in-game menu.");
         void Key(string? value, string fallback, bool used, string code, string what)
         {
             if (!NeuralHotkeys.TryParse(value ?? fallback, out var key)) { Error(code, $"The {what} key is not a recognized key. Record it again."); return; }
@@ -239,14 +274,14 @@ public static class ProfileValidation
             if (used && NeuralHotkeys.IsDcsDefault(key))
                 issues.Add(new(code + "-dcs", IssueSeverity.Warning, $"{NeuralHotkeys.Label(key)} ({what}) is a DCS default key binding: DCS reacts to it too. Choose another combination unless you have unbound it in DCS."));
         }
-        Key(profile.NeuralToggleKey, NeuralHotkeys.Default, profile.NeuralRendering, "neural-hotkey", "DLSS 5 toggle");
+        Key(profile.NeuralToggleKey, NeuralHotkeys.Default, profile.UsesNeuralToggleKey, "neural-hotkey", "DLSS 5 toggle");
         Key(profile.DiagnosticOverlayKey, NeuralHotkeys.DiagnosticDefault, profile.UsesHeadsetPanel, "diagnostic-hotkey", "headset panel");
-        if (profile.NeuralRendering && profile.UsesHeadsetPanel && NeuralHotkeys.TryParse(profile.NeuralToggleKey ?? NeuralHotkeys.Default, out var nrKey) && !nrKey.IsOff
+        if (profile.UsesNeuralToggleKey && profile.UsesHeadsetPanel && NeuralHotkeys.TryParse(profile.NeuralToggleKey ?? NeuralHotkeys.Default, out var nrKey) && !nrKey.IsOff
             && NeuralHotkeys.Same(profile.NeuralToggleKey ?? NeuralHotkeys.Default, profile.DiagnosticOverlayKey ?? NeuralHotkeys.DiagnosticDefault))
             Error("hotkey-conflict", "The DLSS 5 toggle and the headset panel need different keys.");
         // The module starts its 3-minute test suite on Ctrl+Alt+F11 with any other modifier too: no in-flight key may use
         // its keys while it runs.
-        if (profile.EngineOptimizations && profile.NeuralRendering && NeuralHotkeys.TryParse(profile.NeuralToggleKey ?? NeuralHotkeys.Default, out var nrSuite) && !nrSuite.IsOff && NeuralHotkeys.EngineModuleKey(nrSuite))
+        if (profile.EngineOptimizations && profile.UsesNeuralToggleKey && NeuralHotkeys.TryParse(profile.NeuralToggleKey ?? NeuralHotkeys.Default, out var nrSuite) && !nrSuite.IsOff && NeuralHotkeys.EngineModuleKey(nrSuite))
             Error("neural-hotkey", $"{NeuralHotkeys.Label(nrSuite)} is reserved by Engine Optimizations (Ctrl+Alt+F8 to F12, Page Up and Page Down). Choose another key.");
         if (profile.EngineOptimizations && profile.UsesHeadsetPanel && NeuralHotkeys.TryParse(profile.DiagnosticOverlayKey ?? NeuralHotkeys.DiagnosticDefault, out var panelSuite) && !panelSuite.IsOff && NeuralHotkeys.EngineModuleKey(panelSuite))
             Error("diagnostic-hotkey", $"{NeuralHotkeys.Label(panelSuite)} is reserved by Engine Optimizations (Ctrl+Alt+F8 to F12, Page Up and Page Down). Choose another key.");
@@ -256,7 +291,7 @@ public static class ProfileValidation
         {
             if (NeuralHotkeys.EngineModuleKey(engineKey))
                 Error("engine-hotkey", $"{NeuralHotkeys.Label(engineKey)} is reserved by Engine Optimizations (Ctrl+Alt+F8 to F12, Page Up and Page Down). Choose another key.");
-            if ((profile.NeuralRendering && NeuralHotkeys.Same(profile.EngineToggleKey ?? NeuralHotkeys.EngineDefault, profile.NeuralToggleKey ?? NeuralHotkeys.Default))
+            if ((profile.UsesNeuralToggleKey && NeuralHotkeys.Same(profile.EngineToggleKey ?? NeuralHotkeys.EngineDefault, profile.NeuralToggleKey ?? NeuralHotkeys.Default))
                 || (profile.UsesHeadsetPanel && NeuralHotkeys.Same(profile.EngineToggleKey ?? NeuralHotkeys.EngineDefault, profile.DiagnosticOverlayKey ?? NeuralHotkeys.DiagnosticDefault)))
                 Error("hotkey-conflict", "The Engine Optimizations switch needs a key of its own: the DLSS 5 toggle or the headset panel uses it.");
         }
@@ -267,7 +302,7 @@ public static class ProfileValidation
             var pupil = profile.PupilShiftToggleKey ?? NeuralHotkeys.PupilDefault;
             if (profile.EngineOptimizations && NeuralHotkeys.EngineModuleKey(pupilKey))
                 Error("pupil-hotkey", $"{NeuralHotkeys.Label(pupilKey)} is reserved by Engine Optimizations (Ctrl+Alt+F8 to F12, Page Up and Page Down). Choose another key.");
-            if ((profile.NeuralRendering && NeuralHotkeys.Same(pupil, profile.NeuralToggleKey ?? NeuralHotkeys.Default))
+            if ((profile.UsesNeuralToggleKey && NeuralHotkeys.Same(pupil, profile.NeuralToggleKey ?? NeuralHotkeys.Default))
                 || (profile.UsesHeadsetPanel && NeuralHotkeys.Same(pupil, profile.DiagnosticOverlayKey ?? NeuralHotkeys.DiagnosticDefault))
                 || (profile.EngineOptimizations && NeuralHotkeys.Same(pupil, profile.EngineToggleKey ?? NeuralHotkeys.EngineDefault)))
                 Error("hotkey-conflict", "The Pupil shift switch needs a key of its own: DLSS 5, the headset panel or Engine Optimizations use it.");
@@ -279,7 +314,7 @@ public static class ProfileValidation
             var depth = profile.DepthBoostToggleKey ?? NeuralHotkeys.DepthBoostDefault;
             if (profile.EngineOptimizations && NeuralHotkeys.EngineModuleKey(depthKey))
                 Error("depth-hotkey", $"{NeuralHotkeys.Label(depthKey)} is reserved by Engine Optimizations (Ctrl+Alt+F8 to F12, Page Up and Page Down). Choose another key.");
-            if ((profile.NeuralRendering && NeuralHotkeys.Same(depth, profile.NeuralToggleKey ?? NeuralHotkeys.Default))
+            if ((profile.UsesNeuralToggleKey && NeuralHotkeys.Same(depth, profile.NeuralToggleKey ?? NeuralHotkeys.Default))
                 || (profile.UsesHeadsetPanel && NeuralHotkeys.Same(depth, profile.DiagnosticOverlayKey ?? NeuralHotkeys.DiagnosticDefault))
                 || (profile.EngineOptimizations && NeuralHotkeys.Same(depth, profile.EngineToggleKey ?? NeuralHotkeys.EngineDefault))
                 || (profile.UsesPupilShift && NeuralHotkeys.Same(depth, profile.PupilShiftToggleKey ?? NeuralHotkeys.PupilDefault)))
@@ -292,7 +327,7 @@ public static class ProfileValidation
             var far = profile.FarDepthToggleKey ?? NeuralHotkeys.FarDepthDefault;
             if (profile.EngineOptimizations && NeuralHotkeys.EngineModuleKey(farKey))
                 Error("far-depth-hotkey", $"{NeuralHotkeys.Label(farKey)} is reserved by Engine Optimizations (Ctrl+Alt+F8 to F12, Page Up and Page Down). Choose another key.");
-            if ((profile.NeuralRendering && NeuralHotkeys.Same(far, profile.NeuralToggleKey ?? NeuralHotkeys.Default))
+            if ((profile.UsesNeuralToggleKey && NeuralHotkeys.Same(far, profile.NeuralToggleKey ?? NeuralHotkeys.Default))
                 || (profile.UsesHeadsetPanel && NeuralHotkeys.Same(far, profile.DiagnosticOverlayKey ?? NeuralHotkeys.DiagnosticDefault))
                 || (profile.EngineOptimizations && NeuralHotkeys.Same(far, profile.EngineToggleKey ?? NeuralHotkeys.EngineDefault))
                 || (profile.UsesPupilShift && NeuralHotkeys.Same(far, profile.PupilShiftToggleKey ?? NeuralHotkeys.PupilDefault))
@@ -306,7 +341,7 @@ public static class ProfileValidation
             var color = profile.ColorModeKey;
             if (profile.EngineOptimizations && NeuralHotkeys.EngineModuleKey(colorKey))
                 Error("color-hotkey", $"{NeuralHotkeys.Label(colorKey)} is reserved by Engine Optimizations (Ctrl+Alt+F8 to F12, Page Up and Page Down). Choose another key.");
-            if ((profile.NeuralRendering && NeuralHotkeys.Same(color, profile.NeuralToggleKey ?? NeuralHotkeys.Default))
+            if ((profile.UsesNeuralToggleKey && NeuralHotkeys.Same(color, profile.NeuralToggleKey ?? NeuralHotkeys.Default))
                 || (profile.UsesHeadsetPanel && NeuralHotkeys.Same(color, profile.DiagnosticOverlayKey ?? NeuralHotkeys.DiagnosticDefault))
                 || (profile.EngineOptimizations && NeuralHotkeys.Same(color, profile.EngineToggleKey ?? NeuralHotkeys.EngineDefault))
                 || (profile.UsesPupilShift && NeuralHotkeys.Same(color, profile.PupilShiftToggleKey ?? NeuralHotkeys.PupilDefault))
@@ -320,7 +355,9 @@ public static class ProfileValidation
             if (profile.UsesCheeky)
                 Error("dlss-gpu", $"DLSS 5 and Foveated Super Resolution need an NVIDIA RTX graphics card; this PC has {GpuInfo.Names}. Turn them off on the DLSS page.");
             if (profile.FrameGen == FrameGeneration.Nvidia)
-                Error("framegen-gpu", $"NVIDIA optical-flow frame generation needs an NVIDIA RTX graphics card; this PC has {GpuInfo.Names}. Choose FidelityFX on the Frame generation page: it runs on any graphics card.");
+                Error("framegen-gpu", profile.Runtime == RuntimeKind.Vdxr
+                    ? $"Optiflow frame generation needs an NVIDIA RTX graphics card; this PC has {GpuInfo.Names}."
+                    : $"NVIDIA optical-flow frame generation needs an NVIDIA RTX graphics card; this PC has {GpuInfo.Names}. Choose FidelityFX on the Frame Generation page: it runs on any graphics card.");
         }
         // NVIDIA's Threaded optimization is not checked here: Off did not remove the driver's command lists in a live test
         // (RTX 5090, driver 32.0.16.2114: the module logged DriverCommandLists=1). The diagnostic package still records it.
@@ -353,6 +390,8 @@ public static class ProfileValidation
             // picked elsewhere would put them in a folder DCS never reads.
             else if (!IsSavedGamesOptions(inventory.OptionsPath))
                 issues.Add(new("options-location", IssueSeverity.Warning, @"The selected options.lua is not in a DCS Saved Games folder (Saved Games\DCS\Config\options.lua). DCS reads only that one, and the engine optimizations and logs are found next to it: select the options.lua DCS uses."));
+            if (profile.Runtime == RuntimeKind.Vdxr && !profile.Desktop && inventory.VdxrRuntime is null && profile.RuntimeManifestPath is null)
+                Error("vdxr-not-found", "Virtual Desktop OpenXR runtime was not found. Install Virtual Desktop Streamer or select its runtime manifest.");
             if (profile.Runtime == RuntimeKind.SboysSteamVr && !profile.Desktop && inventory.SteamVrRuntime is null && profile.RuntimeManifestPath is null)
                 Error("steamvr-not-found", "SteamVR was not found on this PC, and the Sboys route needs it. Install SteamVR and start it once.");
             // The Periphery DLSS preset changes DCS's own DLSS: with another upscaler it does nothing (DCS Control does not

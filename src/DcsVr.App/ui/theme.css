@@ -180,14 +180,29 @@ button:disabled{opacity:1;color:#8c8c8c!important;background:transparent!importa
 .control-panel select{width:100%}
 .panel-profile{font:600 13px "Segoe UI",Interface,sans-serif;color:var(--soft);margin:10px 0 0;text-transform:none;letter-spacing:0}
 .route-switch{display:grid;grid-template-columns:1fr 1fr;gap:8px}
-/* Optimizations only (any other headset or the monitor): a full-width choice under the two headset routes. */
-.route-switch button[data-route="Desktop"]{grid-column:1 / -1}
+/* The two desktop routes are full-width choices below the headset routes. */
+.route-switch button[data-route="Desktop"],.route-switch button[data-route="DesktopEnhanced"]{grid-column:1 / -1}
 .route-switch button{display:flex;align-items:center;justify-content:center;gap:8px;min-height:44px;border:1.5px solid #d8d8d8;border-radius:999px;background:transparent;color:var(--text);font:700 14px "Segoe UI",Interface,sans-serif;letter-spacing:.4px;text-transform:uppercase;cursor:pointer;transition:background .14s,color .14s,border-color .14s}
 .route-switch button:hover:not(:disabled){background:#ffffff12}
 .route-switch button.selected{background:#fff;color:#1b1b1b;border-color:#fff}
 .live-dot{width:7px;height:7px;border-radius:50%;background:#ffffff2e;flex-shrink:0}
 .route-switch button.live .live-dot{background:var(--green);box-shadow:0 0 8px var(--green)}
 .route-switch button.selected.live .live-dot{background:#178a45;box-shadow:none}
+/* The two grids share the target output aspect ratio and the NR spatial mapping. */
+.spatial-mini{margin-top:12px;padding-top:12px;border-top:1px solid var(--line)}
+.spatial-pictures{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
+.spatial-pictures figure{margin:0;min-width:0}
+.spatial-pictures svg{display:block;width:100%;height:auto;max-height:180px;overflow:visible}
+.spatial-pictures figcaption{margin-top:5px;text-align:center;color:var(--muted);font-size:11px}
+.spatial-output{fill:var(--field);stroke:var(--line-strong);vector-effect:non-scaling-stroke}
+.spatial-grid{fill:none;stroke:var(--muted);stroke-width:.7;opacity:.5}
+.spatial-grid path{vector-effect:non-scaling-stroke}
+.spatial-center{fill:var(--accent-dim);stroke:var(--accent);vector-effect:non-scaling-stroke}
+.spatial-feather{fill:none;stroke:var(--accent);stroke-dasharray:4 3;vector-effect:non-scaling-stroke}
+.spatial-working{fill:none;stroke:var(--cyan);stroke-dasharray:4 3;vector-effect:non-scaling-stroke}
+.spatial-mini.is-idle svg{opacity:.5}
+.spatial-mini>.fine{margin:9px 0 5px}
+.spatial-legend{display:grid;gap:3px;margin:0;color:var(--muted);font-size:11px}
 .route-live{min-height:16px;margin-top:8px;font-size:11.5px;line-height:1.45;color:var(--muted)}
 .route-live.mismatch{color:#ffd2c8}
 .route-live.mismatch:before{content:"Route mismatch · ";font-weight:700;color:var(--red)}
@@ -932,7 +947,7 @@ p.setting-more{max-width:66ch;border-left:0;padding:8px 12px;margin-top:8px;bord
 .check-line{padding:0;font-size:13px;color:var(--soft)}
 .check-line b{display:block;margin:0 0 1px;font-size:14px}
 .check-row>.link-button{align-self:center}
-#pages .page .two-column:has(> div > [hidden]:only-child){grid-template-columns:minmax(0,1fr)}
+#pages .page .two-column:has(> div > [hidden]:only-child),#page-osd .two-column:has(> [hidden]){grid-template-columns:minmax(0,1fr)}
 /* Narrow cards: the control goes under its text, as before */
 @container (max-width:470px){.setting{grid-template-columns:minmax(0,1fr)}.setting>select,.setting>.setting-number{grid-column:1;grid-row:auto;margin-top:8px;justify-self:start}.setting:has(>.hotkey-row){grid-template-columns:minmax(0,1fr) auto}}
 @container (max-width:360px){.setting:has(>.hotkey-row){grid-template-columns:minmax(0,1fr)}.setting>.hotkey-row{grid-column:1;grid-row:auto;margin-top:8px;justify-self:start}}

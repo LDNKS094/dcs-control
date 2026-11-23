@@ -39,6 +39,21 @@ public sealed class WindowsInventory
         return standard;
     }
 
+    /// <summary>The x64 VDXR manifest from the selected runtime or the bundled Streamer installation.</summary>
+    public static string? VdxrRuntimeManifest(string? activeRuntime)
+    {
+        var standard = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), @"Virtual Desktop Streamer\OpenXR\virtualdesktop-openxr.json");
+        if (activeRuntime is not null && Path.GetFileName(activeRuntime).Equals("virtualdesktop-openxr.json", StringComparison.OrdinalIgnoreCase) && File.Exists(activeRuntime))
+            return Path.GetFullPath(activeRuntime);
+        if (File.Exists(standard)) return standard;
+        try
+        {
+            using var runtimes = Registry.LocalMachine.OpenSubKey(@"SOFTWARE\Khronos\OpenXR\1\AvailableRuntimes");
+            return runtimes?.GetValueNames().FirstOrDefault(path => Path.GetFileName(path).Equals("virtualdesktop-openxr.json", StringComparison.OrdinalIgnoreCase) && File.Exists(path));
+        }
+        catch (Exception e) when (e is System.Security.SecurityException or UnauthorizedAccessException or IOException) { return null; }
+    }
+
     public InventorySnapshot Capture(string? executableOverride = null, string? optionsOverride = null)
     {
         var observations = new List<string>();
@@ -96,7 +111,7 @@ public sealed class WindowsInventory
             try
             {
                 var lua = new LuaOptions(File.ReadAllText(options));
-                foreach (var path in new[] { "VR.openxr_quadView", "VR.openxr_eyeGaze", "VR.pixel_density", "graphics.Upscaling", "graphics.DLSS_PerfQuality", "graphics.maxFPS", "graphics.sync", "VR.custom_IPD_enable", "VR.custom_IPD" })
+                foreach (var path in new[] { "VR.openxr_quadView", "VR.openxr_eyeGaze", "VR.pixel_density", "graphics.Upscaling", "graphics.DLSS_PerfQuality", "graphics.width", "graphics.height", "graphics.aspect", "graphics.maxFPS", "graphics.sync", "VR.custom_IPD_enable", "VR.custom_IPD" })
                     if (lua.Get(path.Split('.')) is { } raw) settings[path] = raw;
             }
             catch (Exception e) when (e is IOException or InvalidDataException or UnauthorizedAccessException) { observations.Add(e.Message); }
@@ -130,6 +145,7 @@ public sealed class WindowsInventory
             DcsExecutable = executable, OptionsPath = options,
             ActiveRuntime = activeRuntime, PimaxRuntime = File.Exists(pimaxManifest) ? pimaxManifest : null,
             SteamVrRuntime = steamManifest is not null && File.Exists(steamManifest) ? steamManifest : null,
+            VdxrRuntime = VdxrRuntimeManifest(activeRuntime),
             PimaxVersion = pimax.Version,
             DcsRunning = dcsRunning,
             Files = files, Layers = layers, Drivers = drivers, DcsSettings = settings, Observations = observations,

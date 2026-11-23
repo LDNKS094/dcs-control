@@ -13,6 +13,7 @@ public static class FramePacing
     {
         FpsLimitMode.Preserve => null,
         FpsLimitMode.RuntimeHeadroom => 300,
+        FpsLimitMode.MatchRefresh when profile.Runtime == RuntimeKind.Vdxr => Math.Max(30, profile.HeadsetRefreshHz),
         // Never below DCS's own minimum (30): 3× at 72 or 75 Hz would ask for 24-25 FPS.
         FpsLimitMode.MatchRefresh => Math.Max(30, profile.HeadsetRefreshHz / CapDivider(profile)),
         FpsLimitMode.Custom => profile.RenderedFpsCap,
@@ -34,6 +35,7 @@ public static class FramePacing
         {
             FpsLimitMode.Preserve => cap is null ? "Keeps DCS's own limit (none set)" : "Keeps DCS's own limit",
             FpsLimitMode.RuntimeHeadroom => "Very high (300 FPS); the headset still sets the pace",
+            FpsLimitMode.MatchRefresh when profile.Runtime == RuntimeKind.Vdxr => "Matches the headset refresh rate",
             FpsLimitMode.MatchRefresh => profile.UsesAdaptiveCadence ? (profile.FpsLimit == FpsLimitMode.Preserve ? "Set to the refresh rate for Only when needed (instead of keeping DCS's own limit)" : "The full refresh rate; generated frames only while DCS falls behind") : fg ? (profile.FrameGenFactor == VrProfile.FrameGenAuto ? "Half the refresh rate; a second generated frame while DCS falls behind" : Multiplier(profile) == 3 ? "A third of the refresh rate, for two generated frames" : "Half the refresh rate, for one generated frame") : "The full refresh rate; frame generation is off",
             _ => "Custom limit"
         };
@@ -46,12 +48,13 @@ public static class FramePacing
 
     /// <summary>Displayed frames per rendered frame for the profile's frame generation. Auto targets 2 (half the
     /// refresh rate); OFXR drops to 3 only while DCS cannot hold that.</summary>
-    public static int Multiplier(VrProfile profile) => profile.FrameGen == FrameGeneration.Off ? 1 : profile.FrameGenFactor == 3 ? 3 : 2;
+    public static int Multiplier(VrProfile profile) => profile.FrameGen == FrameGeneration.Off ? 1 : profile.UsesCheekyFrameGeneration && profile.FrameGenFactor >= 2 ? profile.FrameGenFactor : profile.FrameGenFactor == 3 ? 3 : 2;
 
     /// <summary>The refresh rate divided by this is the frame rate DCS should render: 1 with frame generation only when
     /// needed (<see cref="VrProfile.UsesAdaptiveCadence"/>: DCS renders at the full refresh rate), otherwise
     /// <see cref="Multiplier"/>.</summary>
-    public static int CapDivider(VrProfile profile) => profile.UsesAdaptiveCadence ? 1 : Multiplier(profile);
+    // Auto needs native-rate headroom so the backend can choose its multiplier from the actual workload.
+    public static int CapDivider(VrProfile profile) => profile.UsesAdaptiveCadence || (profile.UsesCheekyFrameGeneration && profile.FrameGenFactor == VrProfile.FrameGenAuto) ? 1 : Multiplier(profile);
 
     public static double? PositiveNumber(string? raw) => double.TryParse(raw, NumberStyles.Float, CultureInfo.InvariantCulture, out var n) && double.IsFinite(n) && n > 0 ? n : null;
 
@@ -61,7 +64,7 @@ public static class FramePacing
         var checks = new List<ReadinessCheck>
         {
             new("fps-cap", plan.DcsCap is null ? CheckState.Manual : CheckState.Pass, "DCS frame limit", plan.CapDescription + (plan.DcsCap is null ? "." : string.Create(CultureInfo.InvariantCulture, $": {plan.DcsCap:0.###} FPS.")) + " Your original value is backed up and comes back with Back to stock DCS."),
-            new("refresh-rate", HeadsetRefresh.ReadFor(profile) is null ? CheckState.Manual : CheckState.Pass, "Refresh rate", (HeadsetRefresh.ReadFor(profile) is { } read ? string.Create(CultureInfo.InvariantCulture, $"{read.Source}: {profile.HeadsetRefreshHz:0.###} Hz.") : string.Create(CultureInfo.InvariantCulture, $"Make sure the headset runs at {profile.HeadsetRefreshHz:0.###} Hz in Pimax Play or SteamVR.")) + string.Create(CultureInfo.InvariantCulture, $" DCS needs to render {plan.RequiredRenderedFps:0.###} FPS") + (plan.FrameGeneration ? (profile.UsesAdaptiveCadence ? "; frames are generated only while it falls behind (2×, 3× when needed)." : profile.FrameGenFactor == VrProfile.FrameGenAuto ? ", plus one generated frame per rendered frame (two while DCS falls behind)." : Multiplier(profile) == 3 ? ", plus two generated frames per rendered frame (3×)." : ", plus one generated frame per rendered frame (2×).") : "; frame generation is off.") + " " + plan.Note)
+            new("refresh-rate", HeadsetRefresh.ReadFor(profile) is null ? CheckState.Manual : CheckState.Pass, "Refresh rate", (HeadsetRefresh.ReadFor(profile) is { } read ? string.Create(CultureInfo.InvariantCulture, $"{read.Source}: {profile.HeadsetRefreshHz:0.###} Hz.") : string.Create(CultureInfo.InvariantCulture, $"Make sure the headset runs at {profile.HeadsetRefreshHz:0.###} Hz in {(profile.Runtime == RuntimeKind.Vdxr ? "Virtual Desktop" : "Pimax Play or SteamVR")}.")) + string.Create(CultureInfo.InvariantCulture, $" DCS needs to render {plan.RequiredRenderedFps:0.###} FPS") + (plan.FrameGeneration ? (profile.UsesCheekyFrameGeneration ? (profile.FrameGenFactor == VrProfile.FrameGenAuto ? "; the backend selects the generated-frame multiplier." : $"; {Multiplier(profile)}× output with generated frames.") : profile.UsesAdaptiveCadence ? "; frames are generated only while it falls behind (2×, 3× when needed)." : profile.FrameGenFactor == VrProfile.FrameGenAuto ? ", plus one generated frame per rendered frame (two while DCS falls behind)." : Multiplier(profile) == 3 ? ", plus two generated frames per rendered frame (3×)." : ", plus one generated frame per rendered frame (2×).") : "; frame generation is off.") + " " + plan.Note)
         };
         // With frame generation only when needed, a lower limit still reaches the refresh rate (frames are then always
         // generated), so the check says what it costs instead of "too low".
@@ -71,9 +74,9 @@ public static class FramePacing
             checks.Add(new("fps-under-target", CheckState.Warning, "Frame limit too low", string.Create(CultureInfo.InvariantCulture, $"A limit of {cap:0.###} FPS is below what DCS needs to render for {profile.HeadsetRefreshHz:0.###} Hz: at most {plan.ConfiguredOutputCeiling:0.###} frames per second reach the headset. Raise the limit or lower the refresh rate.")));
         if (inventory.AutoexecPath is not null)
             checks.Add(new("autoexec-pacing", inventory.AutoexecMaxFps is not null || inventory.AutoexecPacingUnknown ? CheckState.Warning : CheckState.Pass, "autoexec.cfg frame limit", inventory.AutoexecMaxFps is { } value
-                ? "DCS's autoexec.cfg sets max_fps = " + value + ", a second frame limit that can hold DCS back. DCS Control leaves this file as it is: check that line yourself."
-                : inventory.AutoexecPacingUnknown ? "DCS's autoexec.cfg has commands DCS Control cannot read, so their effect on the frame rate is unknown. DCS Control leaves this file as it is: check it yourself."
-                : "DCS's autoexec.cfg sets no frame limit (max_fps). DCS Control leaves this file as it is."));
+                ? "DCS's autoexec.cfg sets max_fps = " + value + ", a second frame limit that can hold DCS back. The max_fps line stays as configured."
+                : inventory.AutoexecPacingUnknown ? "DCS's autoexec.cfg has commands DCS Control cannot read, so their effect on the frame rate is unknown. Check those commands for frame-rate settings."
+                : "DCS's autoexec.cfg sets no frame limit (max_fps). Its frame-rate commands stay as configured."));
         var sync = inventory.DcsSettings.GetValueOrDefault("graphics.sync");
         checks.Add(new("dcs-vsync", !profile.DisableDcsVSync && sync == "true" ? CheckState.Warning : CheckState.Pass, "DCS desktop VSync",
             profile.DisableDcsVSync ? "Desktop VSync is turned off at launch; your original value is backed up. The headset keeps its own sync."
@@ -98,6 +101,13 @@ public static class FramePacing
     /// <summary>autoexec.cfg turns on HUD_MFD_after_DLSS: its last assignment outside comments says true.</summary>
     public static bool HudAfterDlss(string text) =>
         AutoexecAssignments(text).Assignments.LastOrDefault(a => a.Name == "HUD_MFD_after_DLSS").Value == "true";
+
+    public static string WithHudAfterDlss(string text, bool enabled)
+    {
+        const string marker = "\n-- DCS Control: HUD after DLSS\nHUD_MFD_after_DLSS = ";
+        return text.Replace(marker + "true\n", "").Replace(marker + "false\n", "")
+            + marker + (enabled ? "true" : "false") + "\n";
+    }
 
     // Line by line: one plain assignment per line ("max_fps = 90", "options.graphics.HUD_MFD_after_DLSS = true"), with
     // "--" and "--[[ ]]" comments; anything else (a function call, a loop) makes the file's effect unknown. Nothing is ever run.

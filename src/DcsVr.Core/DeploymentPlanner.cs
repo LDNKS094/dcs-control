@@ -11,7 +11,7 @@ namespace DcsVr.Core;
 /// defer-until-submitted patch for Quad Views.</param>
 /// <param name="EngineDirectory">DCS engine optimizations (native/dcsqvcull): DcsQvCull.dll, DcsQvCullPayload.dll and DcsQvCull.lua.</param>
 /// <param name="PupilShiftDll">Pupil shift OpenXR layer (native/pupil_shift): XR_APILAYER_DCSVR_pupil_shift.dll.</param>
-public sealed record ComponentLocations(string? OfxrDirectory, string? CheekyDirectory, string? CheekyLayerDll, string? QuadViewsDirectory = null, string? QuadFocusDirectory = null, string? OfxrLayerDll = null, string? EngineDirectory = null, string? PupilShiftDll = null);
+public sealed record ComponentLocations(string? OfxrDirectory, string? CheekyDirectory, string? CheekyLayerDll, string? QuadViewsDirectory = null, string? QuadFocusDirectory = null, string? OfxrLayerDll = null, string? EngineDirectory = null, string? PupilShiftDll = null, string? OptiScalerDirectory = null, string? DcsRenderDirectory = null);
 
 public sealed class DeploymentPlanner(ComponentLocations components)
 {
@@ -30,7 +30,7 @@ public sealed class DeploymentPlanner(ComponentLocations components)
     /// to DcsQvCull.ini; null leaves the cache in the module's own folder.</param>
     /// <remarks>Existing files are never a conflict: Apply backs up an original the first time it writes a path and
     /// overwrites afterwards (see <see cref="OriginalsStore"/>).</remarks>
-    public ApplyPlan Build(VrProfile profile, InventorySnapshot inventory, string managedRoot, VrProfile? savedProfile = null, AppliedFovea? appliedFovea = null, IReadOnlyDictionary<string, string?>? ownedSettings = null, string? neuralSha256 = null, byte[]? chainedDxgi = null, string? shaderCacheDirectory = null)
+    public ApplyPlan Build(VrProfile profile, InventorySnapshot inventory, string managedRoot, VrProfile? savedProfile = null, AppliedFovea? appliedFovea = null, IReadOnlyDictionary<string, string?>? ownedSettings = null, string? neuralSha256 = null, byte[]? chainedDxgi = null, string? desktopConfiguration = null, OriginalFile? autoexecOriginal = null, string? shaderCacheDirectory = null)
     {
         // Optimizations only: none of the VR settings the profile keeps for later is deployed.
         profile = profile.ForLaunch();
@@ -50,7 +50,12 @@ public sealed class DeploymentPlanner(ComponentLocations components)
         // no OpenXR variable at all, so none is required or pinned.
         if (!profile.Desktop)
         {
-            var runtime = profile.RuntimeManifestPath ?? (profile.Runtime == RuntimeKind.Pimax ? inventory.PimaxRuntime : inventory.SteamVrRuntime);
+            var runtime = profile.RuntimeManifestPath ?? profile.Runtime switch
+            {
+                RuntimeKind.Pimax => inventory.PimaxRuntime,
+                RuntimeKind.Vdxr => inventory.VdxrRuntime,
+                _ => inventory.SteamVrRuntime
+            };
             if (runtime is null || !File.Exists(runtime)) throw new InvalidDataException("OpenXR runtime manifest unavailable.");
             using (var document = JsonDocument.Parse(File.ReadAllText(runtime)))
             {
@@ -64,7 +69,7 @@ public sealed class DeploymentPlanner(ComponentLocations components)
             environment["XR_RUNTIME_JSON"] = Path.GetFullPath(runtime);
         }
         environment["DCSVR_QUAD_FOCUS"] = profile.UsesQuadFocus ? "1" : "0";
-        environment["DCSVR_NR_HOTKEY"] = profile.NeuralRendering ? NeuralHotkeys.Environment(profile.NeuralToggleKey) : "0:0";
+        environment["DCSVR_NR_HOTKEY"] = profile.UsesNeuralToggleKey ? NeuralHotkeys.Environment(profile.NeuralToggleKey) : "0:0";
         // The diagnostic panel is drawn by OFXR: with frame generation, or loaded for the panel alone (HeadsetPanel).
         var framegen = profile.UsesHeadsetPanel;
         environment["DCSVR_DIAG_HOTKEY"] = framegen ? NeuralHotkeys.Environment(profile.DiagnosticOverlayKey, NeuralHotkeys.DiagnosticDefault) : "0:0";
@@ -113,12 +118,27 @@ public sealed class DeploymentPlanner(ComponentLocations components)
         }
         // Optimizations only leaves DCS's VR setting as the user has it (another headset, or the monitor).
         if (!profile.Desktop) Require("VR.enable", true);
+        else if (profile.UsesOptiScaler) Require("VR.enable", false);
         // DCS asks for quad views only with this option on; stereo Cheeky needs it off, otherwise it is left alone.
         if (profile.QuadViews != QuadProvider.None) Require("VR.openxr_quadView", true);
         else if (profile.UsesCheeky && current.Get("VR", "openxr_quadView") is not null) Require("VR.openxr_quadView", false);
         // Cheeky and DLSS 5 work on DCS's DLSS Super Resolution.
-        if (profile.UsesCheeky) Require("graphics.Upscaling", "DLSS");
-        // Frame pacing is set for the headset; on a monitor DCS keeps the user's own frame cap and vertical sync.
+        if (profile.UsesCheeky || profile.UsesOptiScaler) Require("graphics.Upscaling", "DLSS");
+        if (profile.UsesOptiScaler && profile.OptiScaler.OverrideResolution)
+        {
+            Require("graphics.width", profile.OptiScaler.OutputWidth);
+            Require("graphics.height", profile.OptiScaler.OutputHeight);
+            Require("graphics.aspect", (double)profile.OptiScaler.OutputWidth / profile.OptiScaler.OutputHeight);
+        }
+        if (profile.UsesOptiScaler)
+        {
+            var settings = profile.OptiScaler;
+            if (settings.MatchDisplayRefresh)
+                Require("graphics.maxFPS", new WindowsDisplayModes().Current(settings.OutputDisplay.Length > 0 ? settings.OutputDisplay : new WindowsDisplayModes().PrimaryDevice()!)!.Refresh);
+            else if (settings.RenderedFpsCap > 0)
+                Require("graphics.maxFPS", settings.RenderedFpsCap);
+        }
+        // Headset frame pacing is independent of the monitor profile's frame-limit controls.
         if (!profile.Desktop && FramePacing.RequestedCap(profile) is { } fpsCap) optionChanges["graphics.maxFPS"] = fpsCap;
         if (!profile.Desktop && profile.DisableDcsVSync) optionChanges["graphics.sync"] = false;
         // The DCS launcher restarts DCS.exe --restarted when Play is pressed, breaking away from any job object; inside a
@@ -167,15 +187,58 @@ public sealed class DeploymentPlanner(ComponentLocations components)
             Require("graphics.fullScreen", false);
             if (current.Get("graphics", "aspect") is not null) Require("graphics.aspect", SmallWindowAspect);
         }
-        // Existing autoexec commands remain untouched, but edits invalidate the saved launch contract.
+        // The HUD override is appended after existing commands; the launch contract pins the resulting file.
         var autoexec = Path.Combine(Path.GetDirectoryName(optionsPath)!, "autoexec.cfg");
-        if (File.Exists(autoexec)) dependencies[autoexec] = Hashing.FileSha256(autoexec);
+        // A profile dropping the override restores the original file, so pin that restored state in the launch contract.
+        var autoexecExists = autoexecOriginal is null ? File.Exists(autoexec) : autoexecOriginal.OriginalSha256 is not null;
+        var managesAutoexec = profile.HudAfterDlss.HasValue && (!profile.Desktop || profile.UsesOptiScaler);
+        if (managesAutoexec)
+        {
+            var content = utf8.GetBytes(FramePacing.WithHudAfterDlss(File.Exists(autoexec) ? File.ReadAllText(autoexec) : "", profile.HudAfterDlss!.Value));
+            Add(autoexec, content, "DCS HUD and MFD draw order");
+            dependencies[autoexec] = Hashing.BytesSha256(content);
+        }
+        else if (autoexecExists) dependencies[autoexec] = autoexecOriginal?.OriginalSha256 ?? Hashing.FileSha256(autoexec);
         var patched = LuaOptions.Patch(text, optionChanges);
         var originalLua = new LuaOptions(text); var installedLua = new LuaOptions(patched);
         // Nothing to change: options.lua is not touched at all.
         if (optionChanges.Count > 0) Add(optionsPath, utf8.GetBytes(patched), "Profile DCS settings",
             luaChanges: optionChanges.Keys.Select(key => new LuaValueChange(key, originalLua.Get(key.Split('.')), installedLua.Get(key.Split('.'))!)).ToArray());
 
+        if (profile.UsesOptiScaler)
+        {
+            var source = RequireDirectory(components.OptiScalerDirectory, "Prepare the Desktop Enhanced components with scripts/prepare-desktop-backend.ps1.");
+            foreach (var file in OptiScalerBackend.ReadFiles(source))
+            {
+                var path = PathPolicy.UnderRoot(source, file.Path);
+                var destination = PathPolicy.UnderRoot(bin, file.Path);
+                if (file.Path.Equals(OptiScalerBackend.IniName, StringComparison.OrdinalIgnoreCase))
+                    Add(destination, OptiScalerBackend.Configuration(File.ReadAllText(path), desktopConfiguration, profile), "Monitor rendering settings",
+                        iniValues: OptiScalerBackend.ConfigurationValues(profile));
+                else if (Path.GetFileName(file.Path).Equals(NeuralRuntimeStore.FileName, StringComparison.OrdinalIgnoreCase))
+                {
+                    var runtime = File.ReadAllBytes(profile.NeuralRuntimePath!);
+                    if (neuralSha256 is not null && Hashing.BytesSha256(runtime) != neuralSha256)
+                        throw new InvalidDataException("The saved DLSS 5 runtime hash has changed.");
+                    NativeBinary.VerifyNeuralRuntime(runtime, allowModified: true);
+                    Add(destination, runtime, "Shared DLSS 5 runtime");
+                }
+                else
+                    // The backend writes either one log or tick-suffixed logs beside its loader.
+                    Add(destination, File.ReadAllBytes(path), "Monitor rendering component " + file.Path,
+                        runtimeLogs: file.Path.Equals("dxgi.dll", StringComparison.OrdinalIgnoreCase)
+                            ? new[] { "OptiScaler.log", "OptiScaler_*.log" }.Select(name => Path.Combine(bin, name)).ToArray() : null);
+            }
+            if (chainedDxgi is not null)
+                Add(PathPolicy.UnderRoot(bin, OptiScalerBackend.ChainedName), chainedDxgi, "Your own dxgi.dll, loaded with Desktop Enhanced");
+        }
+        if (profile.UsesRenderingLifecycle)
+        {
+            var adapter = RequireDirectory(components.DcsRenderDirectory, "Prepare the DCS rendering adapter with scripts/build-dcsrender.ps1 and scripts/build-desktop-dev.ps1.");
+            foreach (var filename in new[] { "DcsRender.lua", "DcsRender.dll" })
+                Add(PathPolicy.UnderRoot(scripts, "Hooks/" + filename), File.ReadAllBytes(Path.Combine(adapter, filename)),
+                    filename.EndsWith(".lua", StringComparison.OrdinalIgnoreCase) ? "Rendering lifecycle hook" : "Rendering lifecycle adapter");
+        }
         if (profile.UsesCheeky)
         {
             var cheeky = RequireDirectory(profile.UsesQuadFocus ? components.QuadFocusDirectory : components.CheekyDirectory,
@@ -183,15 +246,43 @@ public sealed class DeploymentPlanner(ComponentLocations components)
             AddLoader(cheeky);
             foreach (var file in new[] { "CheekyFoveatedDLSSHost.dll", "CheekyFoveatedDLSSRuntime.dll" })
                 Add(PathPolicy.UnderRoot(bin, "CheekyFoveatedDLSS/" + file), File.ReadAllBytes(PathPolicy.UnderRoot(cheeky, "CheekyFoveatedDLSS/" + file)), "Cheeky runtime", ownHashes: Variants("CheekyFoveatedDLSS/" + file));
+            if (profile.UsesCheekyFrameGeneration)
+                Add(PathPolicy.UnderRoot(bin, "nvngx_dlssg.dll"), File.ReadAllBytes(PathPolicy.UnderRoot(cheeky, "nvngx_dlssg.dll")), "DLSS frame generation runtime");
             var cheekyIni = ConfigurationWriters.Cheeky(profile);
             Add(PathPolicy.UnderRoot(bin, "CheekyFoveatedDLSS/CheekyFoveatedDLSS.ini"), new UTF8Encoding(false).GetBytes(cheekyIni), "DLSS and gaze settings", iniValues: IniFile.Parse(cheekyIni));
+            if (profile.Runtime == RuntimeKind.Vdxr && NeuralHotkeys.TryParse(profile.VdxrMenuKey, out var menuKey)
+                && NeuralHotkeys.IsMenuShortcut(menuKey, desktop: false))
+            {
+                var path = PathPolicy.UnderRoot(bin, "CheekyFoveatedDLSS/CheekyOverlay.ini");
+                var settings = new Dictionary<string, string> { ["Overlay.MenuKey"] = menuKey.VirtualKey.ToString(CultureInfo.InvariantCulture) };
+                byte[] existing = File.Exists(path) ? File.ReadAllBytes(path) : [];
+                var overlayIni = IniFile.Decode(existing);
+                if (uint.TryParse(IniFile.Parse(overlayIni).GetValueOrDefault("Overlay.FocusRecenterShortcut"), out var recenter)
+                    && (recenter & 0xff) == menuKey.VirtualKey)
+                    throw new InvalidDataException("The in-game menu and focus recenter need different keys.");
+                Add(path, IniFile.Encode(IniFile.SetValues(overlayIni, settings), existing), "In-game menu shortcut", iniValues: settings);
+            }
             // Cheeky's loader and stereo runtime are byte-identical to its public release: this mark says DCS Control put
             // them here, so they can be told from a Cheeky the pilot installed if the record of originals is ever lost.
             AddText(PathPolicy.UnderRoot(bin, "CheekyFoveatedDLSS/" + Leftovers.OwnerMark), Leftovers.OwnerMarkText, "DCS Control's mark on its DLSS 5 files");
             var layerDll = components.CheekyLayerDll ?? throw new InvalidDataException("Cheeky OpenXR layer unavailable.");
             var deployedDll = PathPolicy.UnderRoot(profileRoot, "cheeky/CheekyOpenXRLayer.dll");
             Add(deployedDll, File.ReadAllBytes(layerDll), "Cheeky OpenXR layer");
-            AddText(PathPolicy.UnderRoot(layersRoot, "cheeky.json"), ConfigurationWriters.LayerManifest("XR_APILAYER_CHEEKY_foveated_dlss", deployedDll, 1, "DCS Control · Cheeky gaze"), "Profile Cheeky manifest");
+            var cheekyManifest = ConfigurationWriters.LayerManifest("XR_APILAYER_CHEEKY_foveated_dlss", deployedDll, 1, "DCS Control · Cheeky gaze");
+            if (profile.Runtime == RuntimeKind.Vdxr)
+            {
+                // Preserve upstream extension declarations while loading the layer explicitly for this profile.
+                var manifestPath = Path.Combine(cheeky, "XR_APILAYER_CHEEKY_foveated_dlss.json");
+                var manifest = System.Text.Json.Nodes.JsonNode.Parse(ConfigurationWriters.ExplicitManifest(File.ReadAllText(manifestPath), manifestPath))!;
+                manifest["api_layer"]!["library_path"] = deployedDll;
+                cheekyManifest = manifest.ToJsonString(JsonData.Options);
+                if (profile.UsesDcsJointNr)
+                {
+                    environment["DCS_NR_JOINT"] = "1";
+                    environment["DCS_NR_FOCUS_STABILITY"] = profile.VdxrNrFocusStability ? "1" : "0";
+                }
+            }
+            AddText(PathPolicy.UnderRoot(layersRoot, "cheeky.json"), cheekyManifest, "Profile Cheeky manifest");
             layerNames.Add("XR_APILAYER_CHEEKY_foveated_dlss");
             environment["CHEEKY_OPENXR_LAYER_DISABLE"] = "1";
             if (profile.NeuralRendering)
@@ -216,7 +307,7 @@ public sealed class DeploymentPlanner(ComponentLocations components)
         // Depth boost or a Visual realism feature alone installs it too, in its Perception-only mode.
         if (profile.UsesEngineModule)
         {
-            var engine = RequireDirectory(components.EngineDirectory, profile.EngineOptimizations ? "The DCS engine optimizations are unavailable." : profile.UsesDepthBoost ? "Depth boost's engine module is unavailable." : "Visual realism's engine module is unavailable.");
+            var engine = RequireDirectory(components.EngineDirectory, profile.UsesDcsJointNr ? "Joint NR's DCS engine module is unavailable." : profile.EngineOptimizations ? "The DCS engine optimizations are unavailable." : profile.UsesDepthBoost ? "Depth boost's engine module is unavailable." : "Visual realism's engine module is unavailable.");
             var module = Path.Combine(scripts, "DcsQvCull");
             Add(Path.Combine(module, "DcsQvCull.dll"), File.ReadAllBytes(Path.Combine(engine, "DcsQvCull.dll")), "DCS engine optimizations loader",
                 // What the module writes while DCS runs; all of it goes with the module on restore. Its shader cache is
@@ -262,17 +353,17 @@ public sealed class DeploymentPlanner(ComponentLocations components)
         // Optimizations only keeps the user's own OpenXR layers (for example their own Quad Views) as they are.
         else if (!profile.Desktop) environment["DISABLE_XR_APILAYER_MBUCCHIA_quad_views_foveated"] = "1";
 
-        if (profile.FrameGen != FrameGeneration.Off || profile.UsesHeadsetPanel)
+        if ((!profile.UsesCheekyFrameGeneration && profile.FrameGen != FrameGeneration.Off) || profile.UsesHeadsetPanel)
         {
             // The fork build is used whenever it is available; the upstream package is only a fallback for stereo
             // profiles in development fixtures, because software Quad Views needs the fork's submitted-only swapchains.
             var forkDll = components.OfxrLayerDll is { } built && File.Exists(built) ? built : null;
             if (forkDll is null && profile.QuadViews == QuadProvider.QuadViewsFoveated)
-                throw new InvalidDataException("Framegen needs the OFXR layer in components/ofxr. Rebuild the release with scripts/build-ofxr-djules75.ps1.");
+                throw new InvalidDataException("Frame Generation needs the OFXR layer in components/ofxr. Rebuild the release with scripts/build-ofxr-djules75.ps1.");
             var ofxr = forkDll is null ? RequireDirectory(components.OfxrDirectory, "OFXR package has not been imported.") : null;
             var dll = PathPolicy.UnderRoot(profileRoot, "ofxr/XR_APILAYER_XRFrameBridge_diagnostic.dll");
             Add(dll, File.ReadAllBytes(forkDll ?? PathPolicy.UnderRoot(ofxr!, "ofxr/XR_APILAYER_XRFrameBridge_diagnostic.dll")), "OFXR framegen");
-            AddIni(PathPolicy.UnderRoot(profileRoot, "ofxr/ofxr_bridge.ini"), ConfigurationWriters.Ofxr(profile, Path.GetDirectoryName(exe)), "Framegen settings");
+            AddIni(PathPolicy.UnderRoot(profileRoot, "ofxr/ofxr_bridge.ini"), ConfigurationWriters.Ofxr(profile, Path.GetDirectoryName(exe)), "Frame Generation settings");
             AddText(PathPolicy.UnderRoot(layersRoot, "ofxr.json"), ConfigurationWriters.LayerManifest("XR_APILAYER_XRFrameBridge_diagnostic", dll, forkDll is null ? 116 : 401, "DCS Control · OFXR Bridge"), "Profile OFXR manifest");
             layerNames.Add("XR_APILAYER_XRFrameBridge_diagnostic");
         }
@@ -345,7 +436,7 @@ public sealed class DeploymentPlanner(ComponentLocations components)
         else if (!profile.Desktop) { environment["XR_API_LAYER_PATH"] = ""; environment["XR_ENABLE_API_LAYERS"] = ""; }
         AddText(PathPolicy.UnderRoot(profileRoot, "profile.json"), JsonData.Serialize(savedProfile ?? profile), "Reproducible profile");
         if (appliedFovea is not null) AddText(PathPolicy.UnderRoot(profileRoot, AppliedFovea.FileName), JsonData.Serialize(appliedFovea), "Focus area values read from Pimax Play");
-        AddText(PathPolicy.UnderRoot(profileRoot, "launch.json"), JsonData.Serialize(new LaunchConfiguration(exe, environment, dependencies, File.Exists(autoexec) ? [] : [autoexec])), "Profile launch environment");
+        AddText(PathPolicy.UnderRoot(profileRoot, "launch.json"), JsonData.Serialize(new LaunchConfiguration(exe, environment, dependencies, managesAutoexec || autoexecExists ? [] : [autoexec])), "Profile launch environment");
         return new(profile.Id, profile.Name, files, environment, exe);
 
         // VR.custom_IPD in millimetres ("64" or 64); null outside 40-90 mm.

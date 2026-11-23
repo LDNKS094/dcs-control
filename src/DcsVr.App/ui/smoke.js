@@ -6,11 +6,14 @@ window.runWebSmoke = async function() {
   // Smoothness buffer and stays in the profile file only.
   const PROFILE_FIELDS = [
     'quadViews','gaze','quadSaccadeLead','quadGazeStabilize','quadTurbo','quadViewsLayerDirectory','foveaSource','quadFocusScale','pimaxPeripheral','pimaxHorizontalFov','pimaxVerticalFov',
-    'quadEdgeBlend','quadRoundFocus','quadSharpening','quadSharpenTaper','quadPeripheryContrast',
-    'neuralRendering','neuralRuntimePath','keepOtherDxgi','neuralFocusArea','quadNeuralEdgeFade','neuralWorkingScale','neuralBeforeUpscaling','neuralIntensity','neuralStyle',
+    'quadEdgeBlend','quadRoundFocus','vdxrFocusWidth','vdxrFocusHeight','vdxrFocusCustomBlend','vdxrFocusFeather',
+    'vdxrFocusCornerRadius','vdxrFocusMatchColor','vdxrFocusMatchStereo','vdxrFocusReferenceDistance',
+    'quadSharpening','quadSharpenTaper','quadPeripheryContrast',
+    'neuralRendering','neuralRuntimePath','vdxrJointNr','vdxrNrFocusStability','keepOtherDxgi','neuralFocusArea','quadNeuralEdgeFade','neuralWorkingScale','neuralBeforeUpscaling','vdxrAutomaticNr','vdxrNrThreshold','neuralIntensity','vdxrNrPreset','neuralStyle',
     'focusDlssPreset','peripheryDlssPreset','foveatedDlss','foveaWidth','foveaHeight','peripheralScale','neuralLocalTone','neuralLocalStructure','neuralSkinStructure','neuralAutomaticMask','neuralUiCorrection','neuralColorStrength',
     'neuralTransferStrength','neuralPaperWhiteScale','neuralDepth','neuralMotionScaleX','neuralMotionScaleY',
-    'frameGen','frameGenFactor','frameGenAdaptiveCadence','frameGenPassThrough','frameGenDeepPipeline','fpsLimit','renderedFpsCap','refreshFromHeadset','headsetRefreshHz','disableDcsVSync',
+    'vdxrCenterSr','vdxrCenterPreset','vdxrCenterSupersampling','vdxrAutomaticSr','vdxrSrThreshold',
+    'frameGen','vdxrFrameGenMethod','vdxrFgDepthGuidance','vdxrFgDepthSplat','frameGenFactor','frameGenAdaptiveCadence','frameGenPassThrough','frameGenDeepPipeline','fpsLimit','renderedFpsCap','refreshFromHeadset','headsetRefreshHz','disableDcsVSync',
     'frameGenHudSymbology','smoothCursor','nvidiaFlowScale','flowPreset','bidirectionalFlow','showOverlay','diagnosticRecorder','diagnosticFrameRecords','frameGenAsyncArm',
     'cpuBoost','boostDcsPriority','boostMoveVrRuntime','boostMoveBackgroundApps','boostBackgroundApps','boostElevated','freeVram','freeVramApps','freeVramReopen',
     'freeVramForce','pauseTobiiDesktop','smallDcsWindow','lowerMonitor','flightDisplayMode',
@@ -18,6 +21,8 @@ window.runWebSmoke = async function() {
     'engineShadowInstancing','engineCostWeights','enginePartitionBoost','engineTextureDedupe','engineEffectBufferSkip','enginePlainCounter','engineFrameHeap',
     'engineStateFilter','engineBeeps','engineShaderCachePrewarm','engineShaderCompileWorkers','engineTimerRefreshUs','engineDevMode','engineDevPayloadPath','engineDevIniPath','engineDiagnosticHooks',
     'dcs','options','keepDcsLauncher',
+    'vdxrFocusHeadOffset','vdxrFocusHorizontalBias','vdxrFocusHorizontalDeadzone','vdxrFocusHorizontalAngleGain',
+    'vdxrFocusVerticalBias','vdxrFocusVerticalDeadzone','vdxrFocusVerticalAngleGain',
     'eyeDistance','eyeDistanceMm','pupilShift','pupilShiftEyeRadiusMm','pupilShiftVirtualImageM','peripheryStability','peripheryStabilityStrength','farDepth','farDepthPreset',
     'depthBoost','ownAircraftTrueDepth','depthBoostMode','depthBoostRealisticMax','depthBoostFarStartM','depthBoostFarFullM','depthBoostMax','depthBoostNearM',
     'colorMode','panelGamut','colorFixExposureEv','colorFixNightEv','colorFixSaturation','colorFixWarmth','colorFixAdaptBright','colorFixAdaptDark','colorEnhancedExposureEv',
@@ -25,10 +30,17 @@ window.runWebSmoke = async function() {
     'glare','glareStrength','nightVisionBlue','nightVisionBlur','nightVisionScotopic','nightVisionPhotopic','glareThresholdEv','glareRadius','glareStreak',
     'gazeDof','gazeDofStrength','gazeDofMaxArcmin','gazeDofSaccadeRelease','gazeDofSettleMs','gazeDofFadeInMs','gazeDofToleranceD','gazeDofFoveaGuardDeg','gazeDofPupilMm',
     'gVision','gVisionStrength','gVisionUseGaze','gVisionRedout','gVisionTolerance','gVisionMode',
-    'headsetPanel','diagnosticOverlayAtStart','headsetPanelPosition','diagnosticVram','diagnosticOverlayKey','engineToggleKey','neuralToggleKey','pupilShiftToggleKey','farDepthToggleKey',
-    'depthBoostToggleKey','colorModeKey','runtimeManifestPath'];
+    'headsetPanel','diagnosticOverlayAtStart','headsetPanelPosition','diagnosticVram','vdxrMenuKey','desktopMenuKey','diagnosticOverlayKey','engineToggleKey','neuralToggleKey','pupilShiftToggleKey','farDepthToggleKey',
+    'depthBoostToggleKey','colorModeKey','runtimeManifestPath',
+    'optiScalerNeuralRendering','optiScalerModelStyle','optiScalerWorkingScale','optiScalerNeuralBeforeUpscaling','optiScalerIntensity',
+    'optiScalerLocalToneStrength','optiScalerLocalStructureStrength','optiScalerSkinStructureStrength','optiScalerAutomaticMask','optiScalerColourStrength',
+    'optiScalerTransferStrength','optiScalerPaperWhiteScale','optiScalerDepthConvention','optiScalerPeripheralCompression','optiScalerCenterWidth',
+    'optiScalerCenterHeight','optiScalerPeripheralRetention','optiScalerSuperResolution','optiScalerQuality','optiScalerPreset',
+    'hudAfterDlss','optiScalerFrameGeneration','optiScalerFrameGenerationFactor','optiScalerOutputFrameLimit','optiScalerFrameRateTarget',
+    'optiScalerFrameLimit','optiScalerRenderedFpsCap','optiScalerVSync','optiScalerShowFps','optiScalerLogToFile',
+    'optiScalerOutputDisplay','optiScalerOutputResolution','optiScalerOutputWidth','optiScalerOutputHeight'];
   // Every folded disclosure (details.advanced), named by its id or the first setting inside it.
-  const ADVANCED_FOLDS = ['quadViewsLayerDirectory','neuralAdvanced','showOverlay','engineGBufferRecorder','engineShaderCachePrewarm','engineTimerRefreshUs','colorFixExposureEv','colorEnhancedExposureEv',
+  const ADVANCED_FOLDS = ['quadViewsLayerDirectory','neuralAdvanced','nrRuntimeDetails','desktopNeuralAdvanced','optiScalerShowFps','showOverlay','engineGBufferRecorder','engineShaderCachePrewarm','engineTimerRefreshUs','colorFixExposureEv','colorEnhancedExposureEv',
     'nightVisionBlue','gazeDofMaxArcmin','gVisionMode','pupilShiftVirtualImageM','depthBoostFarStartM','runtimeManifestPath'];
   /** " (missing: …; extra: …)" between an expected list and the actual one; '' when they hold the same names once each. */
   const listDiff = (expected,actual) => { const missing = expected.filter(x => !actual.includes(x)), extra = actual.filter(x => !expected.includes(x)), twice = actual.filter((x,i) => actual.indexOf(x) !== i);
@@ -37,16 +49,17 @@ window.runWebSmoke = async function() {
   // A key pressed while a capture field records: the page listens on window in the capture phase.
   const press = (keyCode,mods = '') => window.dispatchEvent(new KeyboardEvent('keydown',{keyCode,ctrlKey:mods.includes('c'),altKey:mods.includes('a'),shiftKey:mods.includes('s'),metaKey:mods.includes('w'),bubbles:true,cancelable:true}));
   const sleep = ms => new Promise(r => setTimeout(r,ms));
-  // The right panel's checklist, profile name and setup buttons fit without scrolling at the 1320 × 920 verification size.
+  // The top bar fits without scrolling at the 1320 × 920 verification size.
   const panelFits = () => { const t = document.querySelector('.topbar'); return t.scrollWidth <= t.clientWidth && $('launch').getBoundingClientRect().right <= document.querySelector('.window-controls').getBoundingClientRect().left; };
   const waitIdle = async () => { for(let i=0;i<500 && document.body.classList.contains('busy');i++) await new Promise(r => setTimeout(r,20)); };
-  // The right-panel checklist, used exactly as a user would: route switch, then one checkbox per feature.
+  // The Overview checklist, used exactly as a user would: route switch, then one checkbox per feature.
   function select(route,features) {
-    if (ui.profile.runtime !== route) document.querySelector(`#routeSwitch [data-route="${route}"]`).click();
+    const routeButton = document.querySelector(`#routeSwitch [data-route="${route}"]`);
+    if (routeButton.getAttribute('aria-checked') !== 'true') routeButton.click();
     for (const [key] of ui.FEATURES) { const box = $('featureCheck-'+key); if (box.checked !== Boolean(features[key])) { box.checked = Boolean(features[key]); box.dispatchEvent(new Event('change',{bubbles:true})); } }
   }
   try {
-    check('Real WebView2 bridge bootstrap with the feature checklist',document.querySelectorAll('#featureList input[type=checkbox]').length === 5 && !$('profilePreset'));
+    check('Real WebView2 bridge bootstrap with the feature checklist',document.querySelectorAll('#featureList input[type=checkbox]').length === 6 && !$('profilePreset'));
     // Updates and What's new, against the host's fixtures (never the network): the settings record an earlier version,
     // so this version's notes open once at start; GitHub's fixture list offers the next patch version.
     { const until = async test => { for (let i = 0; i < 150 && !test(); i++) await sleep(20); return test(); };
@@ -85,11 +98,11 @@ window.runWebSmoke = async function() {
       $('updateHide').click(); check('The banner can be hidden until the next start',$('updateBanner').hidden && !$('railUpdate').hidden); }
     check('One primary action: Launch DCS, with Review files, Apply without launching and Back to stock DCS as links',!$('preview') && !$('heroChips') && $('launch').classList.contains('launch') && $('reviewPlan').classList.contains('link-button') && $('apply').classList.contains('link-button') && $('apply').textContent === 'Apply without launching' && $('openRecovery').classList.contains('link-button') && !document.querySelector('.workflow').textContent.match(/Preview|Apply profile/));
     { const diff = listDiff(PROFILE_FIELDS,ui.fields.map(f => f.path));
-      check('All editable profile controls available'+diff,!diff && document.querySelectorAll('#routeSwitch [data-route]').length === 3); }
+      check('All editable profile controls available'+diff,!diff && document.querySelectorAll('#routeSwitch [data-route]').length === 5); }
     check('Quality presets, self-reported limiters and the unused Sboys folder are gone',!$('tuningPreset') && !$('undoTune') && !$('tuningDialog') && !$('budgets') && !['externalLimiter','externalLimiterFps','runtimeReprojection','sboysDriverDirectory'].some(p => ui.fields.some(f => f.path === p)));
     const folds = [...document.querySelectorAll('details.advanced')], foldDiff = listDiff(ADVANCED_FOLDS,folds.map(d => d.id || d.querySelector('.setting')?.id.replace('setting-','') || '(empty fold)'));
     check('Background preparation and per-frame records sit in the one Framegen Diagnostics fold; the deep hold has no control',$('setting-frameGenAsyncArm').closest('details') && $('setting-frameGenAsyncArm').closest('details').querySelector('summary').textContent.startsWith('Diagnostics') && $('setting-frameGenAsyncArm').closest('details') === $('setting-diagnosticFrameRecords').closest('details') && $('setting-showOverlay').closest('details') === $('setting-frameGenAsyncArm').closest('details') && !$('setting-frameGenPipelinedDeepHold') && ui.fields.find(f => f.path === 'frameGenAsyncArm').page === 'framegen' && ui.fields.find(f => f.path === 'diagnosticFrameRecords').page === 'framegen');
-    check('Rarely changed settings start folded away'+foldDiff,!foldDiff && folds.every(d => !d.open) &&$('setting-quadViewsLayerDirectory').closest('details') && $('setting-runtimeManifestPath').closest('details') && $('setting-neuralLocalTone').closest('details') && $('setting-diagnosticRecorder').closest('details') && $('setting-engineTimerRefreshUs').closest('details') && $('setting-colorFixSaturation').closest('details') && $('setting-gazeDofSettleMs').closest('details') && !$('setting-colorMode').closest('details'));
+    check('Rarely changed settings start folded away'+foldDiff,!foldDiff && folds.every(d => d.id === 'nrRuntimeDetails' || !d.open) &&$('setting-quadViewsLayerDirectory').closest('details') && $('setting-runtimeManifestPath').closest('details') && $('setting-neuralLocalTone').closest('details') && $('setting-diagnosticRecorder').closest('details') && $('setting-engineTimerRefreshUs').closest('details') && $('setting-colorFixSaturation').closest('details') && $('setting-gazeDofSettleMs').closest('details') && !$('setting-colorMode').closest('details'));
     // Pimax Play's page exactly as Pimax Play shows it (labels, order, rounding), from the fixture's Quick 33 % or Fine 33/10 · 33/33.
     const fineFixture = window.offlineFixture.pimaxMode === 'Fine', pimaxShows = () => ui.state.pimax.controls.map(x => x.label+' '+x.value).join(', ');
     const expectedControls = fineFixture
@@ -113,17 +126,18 @@ window.runWebSmoke = async function() {
         $('searchDialog').close();
         check('With Optimizations only search leaves out hidden settings and cards: the headset panel, its key, DLSS 5 on the focus area and the VR helpers',!panel.includes('Headset panel (OSD)') && !panel.includes('Headset panel') && keys.includes('In-flight keys') && !focus.includes('DLSS 5 not applied') && !helpers.length); }
       ui.navigate('osd');
-      check('With Optimizations only the Keys & headset panel page shows the keys in one column, without an empty one beside them',$('panelControls').hidden && getComputedStyle($('panelControls').parentElement).display === 'none' && Math.abs($('keysControls').getBoundingClientRect().width - $('page-osd').querySelector('.two-column').getBoundingClientRect().width) < 2);
+      check('With Optimizations only the In Flight page shows the keys in one column, without an empty one beside them',$('panelControls').hidden && getComputedStyle($('panelControls').parentElement).display === 'none' && Math.abs($('keysControls').getBoundingClientRect().width - $('page-osd').querySelector('.two-column').getBoundingClientRect().width) < 2);
       ui.navigate('overview');
       document.querySelector(`#routeSwitch [data-route="${before.runtime}"]`).click();
       check('Pimax or Sboys after Optimizations only brings the VR features back',ui.profile.desktop === false && ui.profile.runtime === before.runtime && ui.profile.quadViews === before.quadViews && ui.profile.frameGen === before.frameGen && ui.profile.neuralRendering === before.neural && !$('feature-quad').hidden && !$('nav-foveation').hidden); }
     check('Legacy defaults preserve the DCS frame limit and VSync',ui.profile.fpsLimit === 'Preserve' && !ui.profile.disableDcsVSync);
     for(const id of ['overview','presets','guide','foveation','dlss','framegen','pupil','visual','osd','boost','engine','setup','diagnostics','support','recovery']) { ui.navigate(id); check('Navigate '+id,!$('page-'+id).hidden && $('nav-'+id).getAttribute('aria-current') === 'page'); }
     ui.navigate('overview'); document.dispatchEvent(new KeyboardEvent('keydown',{key:'0',code:'Digit0',ctrlKey:true,bubbles:true,cancelable:true}));
-    check('Ctrl+0 opens Keys & headset panel, and its rail button says so',!$('page-osd').hidden && $('nav-osd').title === 'Keys & headset panel (Ctrl 0)');
+    check('Ctrl+0 opens In Flight, and its rail button says so',!$('page-osd').hidden && $('nav-osd').title === 'In Flight (Ctrl 0)');
     document.dispatchEvent(new KeyboardEvent('keydown',{key:'C',code:'KeyC',ctrlKey:true,shiftKey:true,bubbles:true,cancelable:true}));
     check('Ctrl+Shift+C opens Checks, and its rail button says so',!$('page-diagnostics').hidden && $('nav-diagnostics').title === 'Checks (Ctrl Shift C)');
-    check('The frame generation page is called Frame generation',$('nav-framegen').textContent.startsWith('Frame generation') && $('pageTitle').textContent !== 'Frame rate' && (ui.navigate('framegen'), $('pageTitle').textContent === 'Frame generation'));
+    check('The frame generation page uses its full name',$('nav-framegen').textContent.startsWith('Frame Generation')
+      && (ui.navigate('framegen'), $('pageTitle').textContent === 'Frame Generation'));
     { ui.navigate('guide'); const cards = [...document.querySelectorAll('#featureGuide .guide-card')];
       check('The Feature guide has a card per feature, each with its benefit and an Open button that leads to its page',cards.length >= 10 && cards.every(c => c.querySelector('.guide-impact') && c.querySelector('[data-guide-page]'))
         && (cards[0].querySelector('[data-guide-page]').click(), page === 'engine' || $('nav-engine').classList.contains('selected'))); ui.navigate('overview'); }
@@ -177,7 +191,7 @@ window.runWebSmoke = async function() {
     check('Dependency notes are short and only where they apply',[...document.querySelectorAll('#featureList .feature-note span')].every(n => n.textContent.length <= 40) && $('featureNotes-framegen').textContent === '' && $('featureNotes-boost').textContent === '');
     // Compact settings: segmented choices, short help with More, fold values, folded program lists, toggle lists, density.
     { const SEGMENTED_S1 = ['quadViews','gaze','foveaSource','frameGen','frameGenFactor','frameGenPassThrough','fpsLimit','nvidiaFlowScale','flowPreset','boostDcsPriority'];
-      const SEGMENTED = [...SEGMENTED_S1,'neuralStyle','neuralDepth','boostPrefetch','eyeDistance','depthBoostMode','farDepthPreset','colorMode','panelGamut','gVisionMode','engineShaderCompileWorkers'];
+      const SEGMENTED = [...SEGMENTED_S1,'neuralStyle','neuralDepth','boostPrefetch','eyeDistance','depthBoostMode','farDepthPreset','colorMode','panelGamut','gVisionMode','engineShaderCompileWorkers','optiScalerModelStyle','optiScalerDepthConvention','optiScalerFrameGenerationFactor','optiScalerOutputFrameLimit','optiScalerFrameLimit','optiScalerVSync'];
       const radios = p => [...$('seg-'+p).querySelectorAll('[role=radio]')], segDiff = listDiff(SEGMENTED,ui.fields.filter(f => f.segments).map(f => f.path));
       check('Short choices are segmented buttons over their select, one per option in the same order'+segDiff,!segDiff && SEGMENTED.every(p => { const f = ui.fields.find(x => x.path === p), g = $('seg-'+p);
         return f.type === 'select' && f.input.tagName === 'SELECT' && g?.getAttribute('role') === 'radiogroup' && radios(p).map(b => b.dataset.value).join('|') === [...f.input.options].map(o => o.value).join('|'); })
@@ -250,7 +264,7 @@ window.runWebSmoke = async function() {
         const parts = [...ui.ENGINE_PARTS,'boostPrefetch','engineBeeps'];
         check('The individual engine optimizations share one toggle list inside their fold',list('engineGBufferRecorder').classList.contains('toggle-list') && parts.every(p => list(p) === list('engineGBufferRecorder')) && list('engineGBufferRecorder').parentElement === $('setting-engineGBufferRecorder').closest('details')); }
       { const folds = [...document.querySelectorAll('details.advanced')], name = d => d.id || d.querySelector('.setting')?.id.replace('setting-','') || '(empty fold)';
-        const empty = folds.filter(d => !d.querySelector(':scope > summary > .fold-value')?.textContent.trim()).map(name);
+        const empty = folds.filter(d => d.id !== 'nrRuntimeDetails' && !d.querySelector(':scope > summary > .fold-value')?.textContent.trim()).map(name);
         check('Every closed fold shows its value'+(empty.length ? ' ('+empty.join(', ')+')' : ''),folds.length === ADVANCED_FOLDS.length && !empty.length);
         const nv = $('neuralAdvanced').querySelector(':scope > summary > .fold-value').textContent, tone = ui.profile.neuralLocalTone, engineFold = $('setting-engineGBufferRecorder').closest('details').querySelector(':scope > summary > .fold-value');
         edit('neuralLocalTone',tone === 1 ? 1.2 : 1); const nv2 = $('neuralAdvanced').querySelector(':scope > summary > .fold-value').textContent; edit('neuralLocalTone',tone);
@@ -368,13 +382,13 @@ window.runWebSmoke = async function() {
     { const cursor = ui.fields.find(f => f.path === 'smoothCursor');
       check('Smooth mouse cursor sits under Frame generation, off by default, and says the click does not move',cursor.page === 'framegen' && cursor.type === 'toggle' && ui.profile.smoothCursor === false && !$('setting-smoothCursor').closest('details') && $('setting-smoothCursor').textContent.includes("Where you click doesn't change")); }
     { const vram = ui.fields.find(f => f.path === 'diagnosticVram');
-      check('The VRAM counter sits with the headset panel settings on the Keys & headset panel page, off by default',vram.page === 'osd' && vram.type === 'toggle' && $('setting-diagnosticVram').closest('.card') === $('setting-headsetPanel').closest('.card') && ui.profile.diagnosticVram === false);
+      check('The VRAM counter sits with the headset panel settings on the In Flight page, off by default',vram.page === 'osd' && vram.type === 'toggle' && $('setting-diagnosticVram').closest('.card') === $('setting-headsetPanel').closest('.card') && ui.profile.diagnosticVram === false);
       check('With Frame generation the headset panel switch gives way to a line saying the panel is always on',ui.profile.desktop || (ui.profile.frameGen !== 'Off' ? $('setting-headsetPanel').hidden && !$('headsetPanelAlways').hidden : !$('setting-headsetPanel').hidden && $('headsetPanelAlways').hidden)); }
     // The draft on screen is saved a moment after an edit, so it survives an app restart.
     edit('quadSharpening',.62); await sleep(900); check('The draft is saved after an edit',ui.savedDraft === JSON.stringify(ui.draft()));
     check('Profile name follows the route and the checked features',ui.profile.name === 'Pimax · Quad Views + DLSS 5 + Frame generation + CPU Boost' && ui.profile.id === 'pimax-qv-dlss5-fg-boost' && $('profileName').textContent === ui.profile.name);
     check('Overview shows a CPU Boost card next to the other features',$('feature-boost').closest('#page-overview') && $('feature-boost').classList.contains('on'));
-    check('Overview shows Perception, Visual realism and Keys & headset panel as a third tile group in VR',$('pipeline').querySelectorAll('.stage-group.extra .stage').length === 3 && $('pipeline').querySelector('.stage-group.extra [data-page=osd]').classList.contains('on') === (ui.profile.frameGen !== 'Off' || Boolean(ui.profile.headsetPanel)));
+    check('Overview shows Perception, Visual realism and In Flight as a third tile group in VR',$('pipeline').querySelectorAll('.stage-group.extra .stage').length === 3 && $('pipeline').querySelector('.stage-group.extra [data-page=osd]').classList.contains('on') === (ui.profile.frameGen !== 'Off' || Boolean(ui.profile.headsetPanel)));
     edit('quadViews','PimaxNative');
     check('DLSS 5 with Quad Views keeps the bundled provider and the focus adapter, explained in one short note',ui.profile.quadViews === 'QuadViewsFoveated' && ui.profile.quadFocusAdapter && $('featureNotes-quad').textContent.includes("can't host") && $('featureNotes-quad').textContent.length < 60 && $('input-quadViews').querySelector('[value=PimaxNative]').disabled);
     check('DLSS 5 without its runtime file asks for it inline',ui.profile.neuralRuntimePath || $('featureNotes-dlss').textContent.includes('Select file'));
@@ -501,7 +515,7 @@ window.runWebSmoke = async function() {
       select(route,features); }
     edit('neuralRendering',true); edit('neuralIntensity',.42); edit('neuralLocalTone',1.23456789123);
     check('Active neural controls enabled',!$('input-neuralLocalTone').disabled);
-    check('The DLSS page is named for its content and holds the stereo focus area and the dxgi switch; Quad Views keeps size, movement and sharpness apart',(ui.navigate('dlss'), $('pageTitle').textContent === 'DLSS') && $('nav-dlss').textContent.startsWith('DLSS') && $('feature-dlss').textContent.includes('DLSS 5') && ['foveaWidth','foveaHeight','peripheralScale'].every(f => $('stereoFocusControls').contains($('setting-'+f))) && $('setting-keepOtherDxgi').closest('.card') === $('setting-neuralRuntimePath').closest('.card') && ['quadSaccadeLead','quadGazeStabilize'].every(f => $('foveationControls').contains($('setting-'+f))) && ['quadSharpening','quadSharpenTaper','quadPeripheryContrast'].every(f => $('sharpnessControls').contains($('setting-'+f))) && $('stereoFocusControls').hidden === (ui.profile.quadViews !== 'None'));
+    check('The DLSS page is named for its content and holds the stereo focus area; DCS & Headset holds the dxgi switch; Quad Views keeps size, movement and sharpness apart',(ui.navigate('dlss'), $('pageTitle').textContent === 'DLSS') && $('nav-dlss').textContent.startsWith('DLSS') && $('feature-dlss').textContent.includes('DLSS 5') && ['foveaWidth','foveaHeight','peripheralScale'].every(f => $('stereoFocusControls').contains($('setting-'+f))) && $('gameControls').contains($('setting-keepOtherDxgi')) && $('nrRuntimeDetails').contains($('setting-neuralRuntimePath')) && ['quadSaccadeLead','quadGazeStabilize'].every(f => $('foveationControls').contains($('setting-'+f))) && ['quadSharpening','quadSharpenTaper','quadPeripheryContrast'].every(f => $('sharpnessControls').contains($('setting-'+f))) && $('stereoFocusControls').hidden === (ui.profile.quadViews !== 'None'));
     check('DLSS 5 runtime file sits on the DLSS page and a missing file is flagged',ui.fields.find(f => f.path === 'neuralRuntimePath').page === 'dlss' && (ui.profile.neuralRuntimePath || $('dlssMissing').textContent.includes('nvngx_dlssnr.dll')));
     let failure = false; try { await ui.run('preview'); } catch(e) { failure = /nvngx_dlssnr/.test(e.message); }
     check('Missing neural DLL reported by Review files',failure && $('statusTitle').textContent === 'Needs attention');
@@ -565,7 +579,7 @@ window.runWebSmoke = async function() {
     const pick = (id,value) => { $(id).value = value; $(id).dispatchEvent(new Event('change')); };
     $('guidedSetup').click(); check('Guided setup opens with a three-step stepper',$('setupDialog').open && $('setupSteps').children.length === 3);
     $('setupClose').click(); check('Cancel setup preserves the exact draft',JSON.stringify(ui.profile) === beforeWizard);
-    wizard.open(); check('Guided setup chooses with the same feature checkboxes',$('setupFeatures').querySelectorAll('input[type=checkbox]').length === 5);
+    wizard.open(); check('Guided setup chooses with the same feature checkboxes',$('setupFeatures').querySelectorAll('input[type=checkbox]').length === 6);
     pick('setupRoute','SboysSteamVr'); wizard.choose({features:{quad:true,dlss:false,framegen:false,boost:false}}); pick('setupGaze','EyeTracked');
     await wizard.next();
     check('Wizard blocks missing registered driver',wizard.step === 1 && $('setupNext').disabled && wizard.report.checks.some(c => c.id === 'sboys-registration' && c.state === 'Error'));
@@ -598,6 +612,153 @@ window.runWebSmoke = async function() {
     if (ui.state.launcherBlocked) { ui.profile.keepDcsLauncher = true; ui.invalidate(); await ui.run('refresh'); check('With the launcher kept, Checks says why it cannot start the game',ui.checkItems().some(c => c.id === 'dcs-launcher' && c.group === 'fix')); ui.profile.keepDcsLauncher = false; ui.invalidate(); await ui.run('refresh'); }
     else { ui.profile.keepDcsLauncher = true; ui.invalidate(); await ui.run('refresh'); check('With the launcher kept and no job in the way, nothing blocks it',ui.profile.keepDcsLauncher && !ui.checkItems().some(c => c.id === 'dcs-launcher' && c.group === 'fix')); ui.profile.keepDcsLauncher = false; ui.invalidate(); await ui.run('refresh'); }
     let offlineDownloadRejected = false; try { await ui.run('prepareSboys'); } catch(e) { offlineDownloadRejected = /Network downloads are disabled/.test(e.message); } check('Unbundled driver download is blocked in offline fixtures',offlineDownloadRejected);
+    select('Vdxr',{quad:true}); ui.navigate('foveation');
+    const focusRow = $('setting-vdxrFocusWidth');
+    edit('vdxrFocusWidth',40); edit('vdxrFocusHeight',60);
+    check('VDXR Quad Views displays its focus controls and area',ui.profile.quadViews === 'CheekyNative'
+      && !focusRow.hidden && !$('vdxrStereoControls').hidden && $('setting-quadFocusScale').hidden
+      && $('vdxrFocusPreview').textContent.includes('24% of a full eye'));
+    edit('vdxrFocusCustomBlend',true); edit('vdxrFocusCornerRadius',25); edit('vdxrFocusFeather',10);
+    check('Both Focus previews show the rounded border and inset feather line',
+      ['vdxrFocusPreview','headFocusPreview'].every(id => $(id).querySelector('.spatial-center').getAttribute('rx') === '10'
+        && $(id).querySelector('.spatial-feather').getAttribute('rx') === '6'
+        && $(id).querySelector('.spatial-feather').getAttribute('width') === '32'));
+    edit('vdxrFocusFeather',0);
+    check('Zero feather shows only the rounded outer border',!$('vdxrFocusPreview').querySelector('.spatial-feather'));
+    check('VDXR reference distance follows stereo matching',$('input-vdxrFocusReferenceDistance').disabled);
+    edit('vdxrFocusMatchStereo',true); edit('vdxrFocusReferenceDistance',.5);
+    check('VDXR reference distance is editable with stereo matching',!$('input-vdxrFocusReferenceDistance').disabled
+      && ui.profile.vdxrFocusReferenceDistance === .5);
+    ui.navigate('pupil');
+    check('VDXR replaces Perception with Head Tracking',$('pageTitle').textContent === 'Head Tracking'
+      && $('perceptionColumns').hidden && !$('headTrackingHeader').hidden
+      && $('headFocusPreview').textContent.includes('24% of a full eye'));
+    edit('vdxrFocusHeadOffset',false);
+    const centeredFocus = $('headFocusPreview').querySelector('.spatial-center');
+    check('Disabling head tracking centers the preview and leaves eye distance available',
+      $('input-vdxrFocusHorizontalAngleGain').disabled && !$('input-eyeDistance').disabled
+      && centeredFocus.getAttribute('x') === '30' && centeredFocus.getAttribute('y') === '15');
+    edit('vdxrFocusHeadOffset',true); edit('vdxrFocusHorizontalAngleGain',.42); edit('vdxrFocusVerticalBias',-35.5);
+    check('Head angle settings are editable per axis',!$('input-vdxrFocusHorizontalAngleGain').disabled
+      && ui.profile.vdxrFocusHorizontalAngleGain === .42 && ui.profile.vdxrFocusVerticalBias === -35.5);
+    ui.adoptDraft({profile:{...ui.profile,vdxrFocusHorizontalBias:90,vdxrFocusVerticalBias:-90}});
+    check('Older profiles display the current offset limits',
+      $('input-vdxrFocusHorizontalBias').value === '45' && $('input-vdxrFocusVerticalBias').value === '-45');
+    edit('vdxrFocusHorizontalBias',10); edit('vdxrFocusVerticalBias',-45);
+    const movedFocus = $('headFocusPreview').querySelector('.spatial-center');
+    check('Head tracking previews fixed offset and clamps to the outer view',
+      Number(movedFocus.getAttribute('x')) > 30 && Math.abs(Number(movedFocus.getAttribute('y'))-30) < .001
+      && $('vdxrFocusPreview').querySelector('.spatial-center').getAttribute('y') === '15');
+    ui.navigate('dlss');
+    check('Joint NR defaults on and follows the VDXR NR switch',!$('setting-vdxrJointNr').hidden
+      && $('input-vdxrJointNr').checked && $('input-vdxrJointNr').disabled);
+    edit('neuralRendering',true); edit('vdxrJointNr',false);
+    check('Joint NR can be turned off independently',!$('input-vdxrJointNr').disabled
+      && !ui.profile.vdxrJointNr && ui.profile.neuralRendering && $('input-vdxrNrFocusStability').disabled);
+    edit('neuralBeforeUpscaling',true); edit('vdxrJointNr',true);
+    const stability = $('input-vdxrNrFocusStability');
+    const available = stability.checked && !stability.disabled;
+    edit('vdxrNrFocusStability',false);
+    check('Focus-guided stability can be disabled without disabling Joint NR',available && !ui.profile.vdxrNrFocusStability && ui.profile.vdxrJointNr);
+    edit('vdxrNrFocusStability',true); edit('vdxrJointNr',false);
+    edit('vdxrNrPreset',2);
+    check('VDXR exposes the DLSS-NR preset',!$('setting-vdxrNrPreset').hidden && ui.profile.vdxrNrPreset === 2);
+    edit('neuralBeforeUpscaling',true); edit('vdxrAutomaticNr',true); edit('vdxrNrThreshold',85);
+    check('VDXR exposes adaptive NR and an independent SR shortcut',!$('page-dlss').hidden
+      && !$('input-vdxrNrThreshold').disabled && !$('feature-sr').hidden
+      && $('setting-neuralFocusArea').hidden && $('setting-quadNeuralEdgeFade').hidden);
+    $('featureCheck-dlss').click();
+    check('The NR shortcut updates the page switch',!$('input-neuralRendering').checked);
+    edit('neuralRendering',true);
+    check('The NR page switch updates the shortcut',$('featureCheck-dlss').checked);
+    $('feature-sr').querySelector('.feature-open').click();
+    $('featureCheck-sr').click();
+    edit('vdxrCenterSupersampling',1.2); edit('vdxrAutomaticSr',true); edit('vdxrSrThreshold',75);
+    check('VDXR keeps an independent SR page and threshold',$('pageTitle').textContent === 'Super Resolution'
+      && $('input-vdxrCenterSr').checked && !$('input-vdxrSrThreshold').disabled
+      && ui.profile.vdxrSrThreshold === 75 && ui.profile.vdxrNrThreshold === 85);
+    edit('vdxrCenterSr',false);
+    check('The SR page switch updates only its own shortcut',!$('featureCheck-sr').checked && $('featureCheck-dlss').checked);
+    $('featureCheck-quad').click();
+    check('The SR shortcut requires Quad Views',$('featureCheck-sr').disabled);
+    $('featureCheck-quad').click();
+    ui.navigate('framegen'); edit('vdxrFrameGenMethod','OptiflowDepth');
+    check('VDXR offers only optical flow methods',$('pageTitle').textContent === 'Frame Generation' && $('setting-frameGen').hidden
+      && [...$('input-vdxrFrameGenMethod').options].map(o => o.value).join(',') === 'Off,Optiflow,OptiflowDepth,OptiflowHybrid'
+      && ui.profile.frameGen === 'Nvidia' && ui.profile.vdxrFrameGenMethod === 'OptiflowDepth');
+    const pacing = [ui.profile.fpsLimit, ui.profile.headsetRefreshHz, ui.profile.frameGenFactor];
+    edit('fpsLimit','MatchRefresh'); edit('headsetRefreshHz',120); edit('frameGenFactor',3);
+    check('VDXR separates the required FPS from the native frame limit',
+      [...$('cadenceMetrics').querySelectorAll('strong')].map(e => e.textContent).join(',') === '40 FPS,120 FPS,120 Hz');
+    edit('fpsLimit',pacing[0]); edit('headsetRefreshHz',pacing[1]); edit('frameGenFactor',pacing[2]);
+    const hybridDepth = ['vdxrFgDepthGuidance','vdxrFgDepthSplat'];
+    const depthHidden = () => hybridDepth.every(key => $('setting-'+key).hidden);
+    const hiddenOutsideHybrid = depthHidden();
+    edit('vdxrFrameGenMethod','OptiflowHybrid');
+    edit('vdxrFgDepthGuidance',true); edit('vdxrFgDepthSplat',true);
+    check('The two VDXR depth settings appear for Hybrid and can be switched independently',hiddenOutsideHybrid
+      && hybridDepth.every(key => !$('setting-'+key).hidden && ui.profile[key] === true));
+    hybridDepth.forEach(key => edit(key,false));
+    edit('vdxrFrameGenMethod','Off');
+    check('VDXR can disable frame generation from the method selector',ui.profile.frameGen === 'Off');
+    ui.navigate('visual');
+    check('VDXR retains headset color controls and hides Pimax-only options',!$('colorControls').hidden
+      && !$('enhancedControls').hidden && !$('gVisionControls').hidden && $('setting-panelGamut').hidden
+      && $('setting-gVisionUseGaze').hidden && $('gazeDofControls').hidden);
+    ui.navigate('guide');
+    const guideCard = title => [...$('featureGuide').querySelectorAll('.guide-card')].find(card => card.querySelector('h3').textContent === title);
+    check('VDXR Feature Guide reflects its rendering pages',
+      ['Quad Views','Head Tracking','Super Resolution','Neural Rendering','Frame Generation'].every(guideCard)
+      && guideCard('Frame Generation').textContent.includes('Optiflow Hybrid')
+      && !guideCard('Sharp HUD') && !guideCard('Periphery DLSS preset'));
+    guideCard('Super Resolution').querySelector('[data-guide-page]').click();
+    check('The VDXR Super Resolution guide opens its settings',!$('page-sr').hidden && !$('vdxrSrColumns').hidden);
+    const visitInFlight = async (path,key) => {
+      ui.navigate('osd');
+      const input = $('input-'+path);
+      for (let i = 0; i < 30 && input.textContent !== key; ++i) await sleep(20);
+      return $('panelControls').hidden && !$('inGameMenuControls').hidden && input.textContent === key;
+    };
+    check('VDXR In Flight shows F8 and the available switches',await visitInFlight('vdxrMenuKey','F8')
+      && ['diagnosticOverlayKey','neuralToggleKey','pupilShiftToggleKey','depthBoostToggleKey','farDepthToggleKey'].every(key => $('setting-'+key).hidden)
+      && !$('setting-vdxrMenuKey').hidden && $('setting-desktopMenuKey').hidden
+      && !$('setting-engineToggleKey').hidden && !$('setting-colorModeKey').hidden);
+    $('input-vdxrMenuKey').click(); press(120,'c');
+    check('VDXR menu requires a single key',ui.profile.vdxrMenuKey == null && $('input-vdxrMenuKey').classList.contains('capturing'));
+    press(120);
+    select('DesktopEnhanced',{engine:true});
+    check('Desktop Enhanced In Flight shows Insert and the engine switch',await visitInFlight('desktopMenuKey','Insert')
+      && !$('setting-desktopMenuKey').hidden && $('setting-vdxrMenuKey').hidden
+      && $('setting-colorModeKey').hidden && $('setting-neuralToggleKey').hidden && !$('setting-engineToggleKey').hidden);
+    $('input-desktopMenuKey').click(); press(36,'ca');
+    check('Both routes remember their own recorded menu key',ui.profile.vdxrMenuKey === '120:0' && ui.profile.desktopMenuKey === '36:3');
+    $('feature-dlss').querySelector('.feature-open').click();
+    check('Desktop Enhanced exposes three rendering switches and its own NR page',!$('page-dlss').hidden
+      && !$('desktopDlssControls').hidden && $('desktopCompressionControls').closest('.page') === $('page-dlss')
+      && ['dlss','sr','framegen'].every(key => !$('feature-'+key).hidden) && $('feature-quad').hidden);
+    $('feature-sr').querySelector('.feature-open').click();
+    check('Desktop Enhanced opens its own Super Resolution page',!$('page-sr').hidden
+      && !$('desktopSrControls').hidden && $('vdxrSrColumns').hidden
+      && $('setting-hudAfterDlss').closest('.page').id === 'page-sr');
+    ui.navigate('guide');
+    guideCard('Super Resolution').querySelector('[data-guide-page]').click();
+    check('Desktop Enhanced Super Resolution guide opens its own page',!$('page-sr').hidden);
+    select('Vdxr',{quad:true});
+    ui.navigate('pupil');
+    select('Pimax',{quad:true,dlss:true,framegen:true});
+    check('Pimax retains its combined page and methods',$('nav-sr').hidden && $('feature-sr').hidden
+      && $('setting-vdxrJointNr').hidden && $('setting-vdxrNrPreset').hidden && $('page-dlss').contains($('dlssProcessing'))
+      && $('setting-vdxrFrameGenMethod').hidden && !$('setting-frameGen').hidden);
+    check('Pimax shows its original Visual realism controls',!$('setting-panelGamut').hidden
+      && !$('setting-gVisionUseGaze').hidden && !$('gazeDofControls').hidden);
+    check('Pimax retains Perception on the same page',$('pageTitle').textContent === 'Perception'
+      && !$('perceptionColumns').hidden && $('headOffsetColumns').hidden && $('headTrackingHeader').hidden
+      && $('perceptionColumns').contains($('eyeControls')));
+    ui.navigate('guide');
+    check('The Pimax Feature Guide retains its rendering advice',guideCard('Frame generation').textContent.includes('FidelityFX')
+      && guideCard('Periphery DLSS preset') && !guideCard('Head Tracking'));
+    ui.navigate('foveation');
+    check('Pimax retains its original Focus area controls',focusRow.hidden && !$('setting-quadFocusScale').hidden);
     // Final screenshots show a complete configurable route, without an applied game modification.
     edit('quadViews','QuadViewsFoveated'); edit('foveatedDlss',true);
     check('With Quad Views Foveated Super Resolution never turns on, and the focus adapter follows DLSS 5',!ui.profile.foveatedDlss && ui.profile.quadFocusAdapter === Boolean(ui.profile.neuralRendering) && !$('featureSummary-dlss').textContent.includes('Foveated'));

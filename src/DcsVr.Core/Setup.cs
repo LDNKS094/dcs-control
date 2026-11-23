@@ -43,12 +43,16 @@ public static class Readiness
         Add("write-access", writable.Count == 0 ? CheckState.Pass : grantable ? CheckState.Warning : CheckState.Error, "Write access to game folders",
             writable.Count == 0 ? "DCS Control can write every file it needs." : "Not writable for your Windows user: " + string.Join(" ", writable.Select(f => f + ": " + LaunchSafety.WriteAdvice(f))));
         if (service.ForeignDxgi(profile, inventory) is { } dxgi)
-            Add("foreign-dxgi", CheckState.Warning, "Another program's dxgi.dll", profile.KeepOtherDxgi
+            Add("foreign-dxgi", CheckState.Warning, "Another program's dxgi.dll", profile.UsesOptiScaler
+                ? profile.KeepOtherDxgi
+                    ? $"DCS's bin folder has a dxgi.dll from {dxgi.Name} ({dxgi.Path}). DCS Control backs it up and loads it through dxgi-original.dll. You can change this choice in DCS settings. Back to stock DCS restores the original."
+                    : $"DCS's bin folder has a dxgi.dll from {dxgi.Name} ({dxgi.Path}). It is backed up and set aside while Desktop Enhanced is applied. Back to stock DCS restores the original."
+                : profile.KeepOtherDxgi
                 ? $"DCS's bin folder has a dxgi.dll from {dxgi.Name} ({dxgi.Path}). DLSS 5 needs that file name, so Launch DCS backs it up and loads it together with DLSS 5: {dxgi.Name} keeps working. If DCS misbehaves with both, turn off Keep another program's dxgi.dll working on the DLSS page."
                 : $"DCS's bin folder has a dxgi.dll from {dxgi.Name} ({dxgi.Path}). DLSS 5 needs that file name, so Launch DCS backs it up and sets it aside while this profile is applied: {dxgi.Name} is off in DCS until Back to stock DCS puts it back.");
         var running = profile.Desktop ? new ActiveRouteState(null, "", default) : ActiveRouteProvider();
         if (running.Route is { } activeRoute && activeRoute != profile.Runtime)
-            Add("route-mismatch", CheckState.Error, "Headset route", running.Summary + " This profile uses " + (profile.Runtime == RuntimeKind.Pimax ? "the Pimax runtime" : "Sboys through SteamVR") + ". Change How you fly in the right panel, or close the other headset software, before launching.");
+            Add("route-mismatch", CheckState.Error, "Headset route", running.Summary + " This profile uses " + (profile.Runtime switch { RuntimeKind.Pimax => "the Pimax runtime", RuntimeKind.Vdxr => "VDXR", _ => "Sboys through SteamVR" }) + ". Change How you fly in the top bar, or close the other headset software, before launching.");
         else if (running.Route is not null) Add("route-mismatch", CheckState.Pass, "Headset route", running.Summary);
         if (inventory.DcsExecutable?.Contains(@"\steamapps\", StringComparison.OrdinalIgnoreCase) == true)
             Add("steam-relaunch", CheckState.Manual, "Steam edition launch", "Keep Steam running and start DCS with Launch DCS in this app. DCS then starts with this profile instead of restarting through Steam without it.");
@@ -57,27 +61,28 @@ public static class Readiness
         else if (profile.KeepDcsLauncher && LaunchSafety.LauncherRestartUnknown)
             Add("dcs-launcher", CheckState.Warning, "DCS launcher", LaunchSafety.LauncherUnknownMessage);
         // DLSS 5 changes the image it runs on: with HUD_MFD_after_DLSS DCS draws the HUD and MFDs afterwards, sharp and
-        // without ghosting. DCS Control does not edit autoexec.cfg.
-        if (profile.NeuralRendering && inventory.OptionsPath is not null)
-            Add("hud-after-dlss", inventory.AutoexecHudAfterDlss == true ? CheckState.Pass : CheckState.Warning, "HUD after DLSS",
-                inventory.AutoexecHudAfterDlss == true ? "autoexec.cfg draws the HUD and MFDs after DLSS, so DLSS 5 leaves them sharp."
-                    : "DLSS 5 can blur or ghost the HUD and MFDs. To keep them sharp, add HUD_MFD_after_DLSS = true to Saved Games\\DCS\\Config\\autoexec.cfg (create the file if needed).");
+        // without ghosting. A selected profile override is applied at launch.
+        if ((profile.NeuralRendering || profile.UsesOptiScaler) && inventory.OptionsPath is not null)
+            Add("hud-after-dlss", (profile.HudAfterDlss ?? inventory.AutoexecHudAfterDlss) == true ? CheckState.Pass : CheckState.Warning, "HUD after DLSS",
+                profile.HudAfterDlss == true ? "Launch DCS sets the HUD and MFDs to draw after DLSS."
+                    : profile.HudAfterDlss is null && inventory.AutoexecHudAfterDlss == true ? "autoexec.cfg draws the HUD and MFDs after DLSS."
+                    : "Enable HUD and MFDs after DLSS on the DLSS page to keep their text sharp.");
         if (!profile.Desktop && inventory.Layers.Any(l => l.Enabled && VectorXr.Is(l)))
             Add("vectorxr", CheckState.Pass, "VectorXR", "Installed. Launch DCS keeps it off in DCS so it doesn't stack with these settings. Started from Steam or a shortcut, DCS still loads it; other games keep it.");
         var foreign = inventory.Layers.Where(l => l.Enabled && !GazeBridge.IsManaged(l, profile) && !VectorXr.Is(l)).Select(l => l.Name ?? Path.GetFileName(l.ManifestPath)).ToArray();
         if (foreign.Length > 0 && !profile.Desktop)
             Add("implicit-layers", CheckState.Warning, "Other VR add-ons (OpenXR layers)", "Other OpenXR add-ons are installed: " + string.Join(", ", foreign) + ". They load before this profile's add-ons and can change the image, eye tracking or frame timing. If something looks wrong, turn them off (for example with OpenXR API Layers GUI).");
-        var manifest = profile.RuntimeManifestPath ?? (profile.Runtime == RuntimeKind.Pimax ? inventory.PimaxRuntime : inventory.SteamVrRuntime);
+        var manifest = profile.RuntimeManifestPath ?? (profile.Runtime switch { RuntimeKind.Pimax => inventory.PimaxRuntime, RuntimeKind.Vdxr => inventory.VdxrRuntime, _ => inventory.SteamVrRuntime });
         if (!profile.Desktop) try
         {
-            using var json = JsonDocument.Parse(File.ReadAllText(manifest ?? throw new InvalidDataException("The headset's OpenXR runtime was not found. Start Pimax Play (or SteamVR) once, then press Check this PC.")));
+            using var json = JsonDocument.Parse(File.ReadAllText(manifest ?? throw new InvalidDataException("The headset's OpenXR runtime was not found. Install the software for the selected headset route, then press Check this PC.")));
             var relative = json.RootElement.GetProperty("runtime").GetProperty("library_path").GetString();
             var dll = Path.GetFullPath(relative ?? throw new InvalidDataException("Runtime library path is empty."), Path.GetDirectoryName(manifest)!);
             if (!NativeBinary.IsX64(dll)) throw new InvalidDataException("The selected runtime library is missing or is not x64: " + dll);
             Add("runtime", CheckState.Pass, "Selected OpenXR runtime", manifest! + " → " + dll);
         }
         catch (Exception e) when (e is IOException or InvalidDataException or UnauthorizedAccessException or JsonException or KeyNotFoundException or ArgumentException or InvalidOperationException)
-        { Add("runtime", CheckState.Error, "Selected OpenXR runtime", e.Message, profile.Runtime == RuntimeKind.Pimax ? "pimax" : "steamvr"); }
+        { Add("runtime", CheckState.Error, "Selected OpenXR runtime", e.Message, profile.Runtime switch { RuntimeKind.Pimax => "pimax", RuntimeKind.Vdxr => "vdxr", _ => "steamvr" }); }
         var missingVc = new[] { "vcruntime140.dll", "vcruntime140_1.dll", "msvcp140.dll" }.Where(n => !NativeBinary.IsX64(Path.Combine(Environment.SystemDirectory, n))).ToArray();
         var vcFile = Path.Combine(Environment.SystemDirectory, "vcruntime140.dll");
         // The numeric parts: older runtimes report "14.29.30139.0 built by: vcwrkspc" as FileVersion.
@@ -88,7 +93,9 @@ public static class Readiness
             missingVc.Length == 0 && currentVc ? "Required x64 C++ runtime libraries are present. Version: " + vcVersion : "Install Microsoft C++ x64 runtime 14.50 or newer. Missing libraries: " + string.Join(", ", missingVc), "vcredist");
         if (profile.FrameGen == FrameGeneration.Nvidia)
             Add("optical-flow-driver", NativeBinary.IsX64(Path.Combine(Environment.SystemDirectory, "nvofapi64.dll")) ? CheckState.Pass : CheckState.Error,
-                "NVIDIA optical-flow driver", "NVIDIA Optical Flow frame generation needs NVIDIA's optical-flow driver, part of the NVIDIA graphics driver for RTX cards. Update the NVIDIA driver, or choose FidelityFX on the Frame generation page: it runs on any graphics card.", "nvidia");
+                "NVIDIA optical-flow driver", profile.Runtime == RuntimeKind.Vdxr
+                    ? "Optiflow needs NVIDIA's optical-flow driver. Update the NVIDIA graphics driver."
+                    : "NVIDIA Optical Flow frame generation needs NVIDIA's optical-flow driver, part of the NVIDIA graphics driver for RTX cards. Update the NVIDIA driver, or choose FidelityFX on the Frame Generation page: it runs on any graphics card.", "nvidia");
         if (profile.Runtime == RuntimeKind.SboysSteamVr && !profile.Desktop)
         {
             var driver = inventory.Drivers.FirstOrDefault(d => d.Name.Contains("customheadset", StringComparison.OrdinalIgnoreCase));
@@ -112,10 +119,12 @@ public static class Readiness
                     gaze is null ? "Dynamic OpenXR gaze needs a bridge such as OpenXR-Eye-Trackers. Its archived Crystal guide does not establish Crystal Super compatibility. Validate its gaze test app; choose Fixed focus explicitly if unavailable." : "Enabled bridge detected. The profile loads it explicitly below Quad Views. Valid eye data and Crystal Super support still need a headset test.", "gaze");
             }
         }
-        if (profile.Desktop)
+        if (profile.Desktop && !profile.UsesOptiScaler)
             Add("desktop", CheckState.Manual, "Optimizations only", "DCS runs as you set it up, on the monitor or with another headset, with your own VR settings and headset software. DCS Control adds only Engine Optimizations, CPU Boost and the flight helpers you turned on.");
-        else
-        Add("headset", CheckState.Manual, "Headset and tracking", "Connect your headset. Before launching DCS, check the image, eye distance, tracking and resolution in Pimax Play (or SteamVR).", profile.Runtime == RuntimeKind.Pimax ? "pimax" : "sboys");
+        else if (!profile.Desktop)
+        Add("headset", CheckState.Manual, "Headset and tracking", profile.Runtime == RuntimeKind.Vdxr
+                ? "Connect Quest 3 in Virtual Desktop. Match Headset refresh rate here to Virtual Desktop's VR frame rate; focus stays fixed in the center."
+                : "Connect your headset. Before launching DCS, check the image, eye distance, tracking and resolution in Pimax Play (or SteamVR).", profile.Runtime switch { RuntimeKind.Pimax => "pimax", RuntimeKind.Vdxr => "vdxr", _ => "sboys" });
         if (profile.Gaze == GazeMode.EyeTracked && profile.QuadViews != QuadProvider.None)
             Add("gaze-live", CheckState.Manual, "Eye tracking calibration", "Turn on and calibrate eye tracking in Pimax Play. Then check in the headset that the focus area follows your eyes.", "gaze");
         if (!profile.Desktop)

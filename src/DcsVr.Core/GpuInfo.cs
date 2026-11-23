@@ -7,6 +7,9 @@ namespace DcsVr.Core;
 /// <param name="Vendor">NVIDIA, AMD, Intel or Other (from the PCI vendor id).</param>
 public sealed record GpuAdapter(string Name, string Vendor, string? Driver);
 
+public sealed record DesktopFrameGenerationCapability(bool? Supported, int? MaxMultiplier, bool? DynamicSupported,
+    string Note, string? DynamicRequirement = null, string? MultiplierRequirement = null);
+
 /// <summary>
 /// The PC's graphics adapters, read once from the display class in the registry (no GPU API is loaded). DLSS 5,
 /// Foveated Super Resolution and NVIDIA optical-flow frame generation need an NVIDIA RTX card; FidelityFX frame
@@ -26,7 +29,50 @@ public static partial class GpuInfo
     /// <summary>"AMD Radeon RX 7900 XTX" (the names of the real adapters, for messages).</summary>
     public static string Names => string.Join(", ", Adapters().Select(a => a.Name));
 
+    /// <summary>Pre-launch GeForce options from the installed hardware and driver; the backend supplies runtime support.</summary>
+    public static DesktopFrameGenerationCapability DesktopFrameGeneration
+    {
+        get
+        {
+            var adapters = Adapters();
+            var nvidia = adapters.Where(a => a.Vendor == "NVIDIA").ToArray();
+            if (adapters.Count == 0 || nvidia.Length > 1)
+                return new(null, null, null, "The rendering GPU is awaiting confirmation.");
+            if (nvidia.Length == 0)
+                return new(false, 1, false, "Native DLSS frame generation requires a GeForce RTX 40 or 50 Series GPU.");
+            var card = nvidia[0];
+            var series = DesktopRtxRegex().Match(card.Name);
+            if (!series.Success)
+                return new(null, null, null, $"The rendering capabilities of {card.Name} are awaiting confirmation.");
+            if (series.Groups[1].Value is "20" or "30")
+                return new(false, 1, false, $"{card.Name} supports DLSS Super Resolution; native frame generation starts with RTX 40 Series.");
+            if (series.Groups[1].Value == "40")
+                return new(true, 2, false, $"{card.Name} supports 2x native frame generation.");
+            var driver = NvidiaDriverNumber(card.Driver);
+            // Streamline 2.14.16's DLSS-G guide specifies 595.41 for Dynamic MFG.
+            var dynamic = driver is { } version ? version >= 59541 : (bool?)null;
+            // NVIDIA's March 31, 2026 release specifies 595.97 for the full 6x feature set.
+            var max = driver is >= 59597 ? 6 : 4;
+            return new(true, max, dynamic,
+                driver is null ? $"{card.Name}: confirm the driver version for 6x and Dynamic MFG."
+                    : $"{card.Name} supports up to {max}x with the detected driver.",
+                dynamic != true ? "Dynamic MFG requires NVIDIA driver 595.41 or newer." : null,
+                max < 6 ? "6x MFG requires NVIDIA driver 595.97 or newer." : null);
+        }
+    }
+
+    private static int? NvidiaDriverNumber(string? text)
+    {
+        if (!Version.TryParse(text, out var version)) return null;
+        // Windows stores 617.42 as 32.0.16.1742.
+        if (version.Build >= 0 && version.Revision >= 0)
+            return version.Build % 10 * 10000 + version.Revision;
+        return version.Major >= 100 && version.Minor is >= 0 and < 100
+            ? version.Major * 100 + version.Minor : null;
+    }
+
     [GeneratedRegex(@"\bRTX\b|\bTITAN RTX\b|\b(?:A|L)\d{2,4}\b|\bH100\b", RegexOptions.IgnoreCase)] private static partial Regex RtxRegex();
+    [GeneratedRegex(@"\bGeForce\s+RTX\s+(20|30|40|50)\d{2}(?:D)?\b", RegexOptions.IgnoreCase)] private static partial Regex DesktopRtxRegex();
     [GeneratedRegex(@"VEN_([0-9A-F]{4})", RegexOptions.IgnoreCase)] private static partial Regex VendorRegex();
 
     private static IReadOnlyList<GpuAdapter> ReadRegistry()

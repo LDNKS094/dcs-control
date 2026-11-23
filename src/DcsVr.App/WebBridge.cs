@@ -561,6 +561,8 @@ internal sealed class WebBridge(ControlService service, Window? owner = null,
                     // Read-only: Pimax Play's Quad View values as they are on disk now.
                     await RefreshEyeResolution();
                     return Reply(id, new { pimax = PimaxView() });
+                case "menuShortcuts":
+                    return Reply(id, await Task.Run(ReadMenuShortcuts));
                 case "checkReadiness":
                     Invalidate(); await Capture();
                     _readiness = await Task.Run(() => Readiness.Check(_profile, CurrentInventory, service));
@@ -578,6 +580,7 @@ internal sealed class WebBridge(ControlService service, Window? owner = null,
                         "gaze" => "https://github.com/mbucchia/Quad-Views-Foveated/wiki/Pimax-Crystal",
                         "pimax" => "https://pimax.com/pages/downloads",
                         "steamvr" => "https://store.steampowered.com/app/250820/SteamVR/",
+                        "vdxr" => "https://www.vrdesktop.net/",
                         "vcredist" => "https://learn.microsoft.com/en-us/cpp/windows/latest-supported-vc-redist",
                         "nvidia" => "https://www.nvidia.com/en-us/drivers/", _ => throw new InvalidDataException("Unknown setup guide.") };
                     using (var process = Process.Start(new ProcessStartInfo(url) { UseShellExecute = true })) { } break;
@@ -961,7 +964,7 @@ internal sealed class WebBridge(ControlService service, Window? owner = null,
         // DCS running is read now: the scan's flag would keep "Close DCS" listed after DCS exits.
         var issues = ProfileValidation.Validate(service.ResolveNeuralRuntime(_profile), CurrentInventory with { DcsRunning = DcsRunning() }).ToList();
         if (!_profile.Desktop && activeRoute.Route is { } running && running != _profile.Runtime)
-            issues.Insert(0, new("route-mismatch", IssueSeverity.Warning, activeRoute.Summary + " This profile uses " + (_profile.Runtime == RuntimeKind.Pimax ? "the Pimax runtime" : "Sboys through SteamVR") + ". Switch the route or use Read settings from this PC before applying."));
+            issues.Insert(0, new("route-mismatch", IssueSeverity.Warning, activeRoute.Summary + " This profile uses " + (_profile.Runtime switch { RuntimeKind.Pimax => "the Pimax runtime", RuntimeKind.Vdxr => "VDXR", _ => "Sboys through SteamVR" }) + ". Switch the route or use Read settings from this PC before applying."));
         if (FoveaFact(_profile) is { } fact) issues.Add(fact);
         if (Leftovers() is { Count: > 0 } leftovers)
             issues.Insert(0, new("leftovers", IssueSeverity.Warning, $"DCS Control's files are in DCS without a record of what was there before ({string.Join(", ", leftovers.Take(3).Select(l => Path.GetFileName(l.Path)))}{(leftovers.Count > 3 ? $" and {leftovers.Count - 3} more" : "")}), for example after Windows was reinstalled. They stay active even when DCS starts from Steam. Back to stock DCS removes them."));
@@ -974,6 +977,35 @@ internal sealed class WebBridge(ControlService service, Window? owner = null,
         else if (_profile.KeepDcsLauncher && LaunchSafety.LauncherRestartUnknown) issues.Insert(0, new("dcs-launcher", IssueSeverity.Warning, LaunchSafety.LauncherUnknownMessage));
         return issues;
     }
+    private object ReadMenuShortcuts()
+    {
+        var bin = Path.GetDirectoryName(_dcs ?? _inventory.DcsExecutable);
+        static Dictionary<string, string> Read(string? folder, string file)
+        {
+            if (folder is null) return [];
+            var path = Path.Combine(folder, file);
+            try { return IniFile.Parse(IniFile.Decode(File.ReadAllBytes(path))); }
+            catch (FileNotFoundException) { return []; }
+            catch (DirectoryNotFoundException) { return []; }
+        }
+        static int Key(string? value, int fallback)
+        {
+            var hex = value?.StartsWith("0x", StringComparison.OrdinalIgnoreCase) == true;
+            return int.TryParse(hex ? value![2..] : value,
+                hex ? System.Globalization.NumberStyles.HexNumber : System.Globalization.NumberStyles.Integer,
+                System.Globalization.CultureInfo.InvariantCulture, out var key) && key is > 0 and < 255 ? key : fallback;
+        }
+        var overlay = Read(bin, "CheekyFoveatedDLSS/CheekyOverlay.ini");
+        var opti = Read(bin, OptiScalerBackend.IniName);
+        bool Flag(string key, bool fallback) => bool.TryParse(opti.GetValueOrDefault("Menu." + key), out var value) ? value : fallback;
+        var desktopKey = Flag("OverlayMenu", true) ? Key(opti.GetValueOrDefault("Menu.ShortcutKey"), 0x2D) : 0;
+        return new
+        {
+            vdxr = new[] { Key(overlay.GetValueOrDefault("Overlay.MenuKey"), 0x77), 0 },
+            desktop = new[] { desktopKey, desktopKey == 0 ? 0 :
+                (Flag("ShortcutKeyRequireCtrl", false) ? 1 : 0) | (Flag("ShortcutKeyRequireAlt", false) ? 2 : 0) }
+        };
+    }
     private object State(IReadOnlySet<string> dcsDefaultKeys)
     {
         var originals = service.Originals.Status();
@@ -983,13 +1015,21 @@ internal sealed class WebBridge(ControlService service, Window? owner = null,
         var activeRoute = ActiveRoute();
         var issues = Issues(activeRoute);
         var launcherBlocked = LaunchSafety.LauncherRestartBlocked;
+        var originalOutput = CurrentInventory.OptionsPath is { } optionsPath ? service.Originals.OwnedSettings(optionsPath) : null;
+        string? OutputSetting(string key) => originalOutput is not null && originalOutput.TryGetValue(key, out var value)
+            ? value : CurrentInventory.DcsSettings.GetValueOrDefault(key);
         // DCS started or closed since the last scan or Check this PC: its row and the "DCS is closed" check follow now.
         var dcsNow = DcsRunning();
         var readiness = _readiness is { } r && r.Checks.Any(c => c.Id == "closed" && (c.State == CheckState.Error) != dcsNow)
             ? r with { Checks = [.. r.Checks.Where(c => c.Id != "closed")] } : _readiness;
         return new { version = ProductInfo.Version, profile = _profile, presets = PresetsView(), dcs = _dcs, options = _options, inventory = CurrentInventory with { DcsRunning = dcsNow }, pimax = PimaxView(),
+            dcsOutputResolution = new { width = OutputSetting("graphics.width"), height = OutputSetting("graphics.height") },
+            dcsFrameLimitBaseline = OutputSetting("graphics.maxFPS"),
+            outputDisplays = new WindowsDisplayModes().Outputs(),
+            bundledNeuralRuntime = File.Exists(service.BundledNeuralRuntime) ? new { path = service.BundledNeuralRuntime,
+                version = System.Diagnostics.FileVersionInfo.GetVersionInfo(service.BundledNeuralRuntime).FileVersion } : null,
             activeRoute = new { route = activeRoute.Route?.ToString(), summary = activeRoute.Summary },
-            issues, cadence = Enum.IsDefined(_profile.FpsLimit) ? FramePacing.Describe(HeadsetRefresh.Resolve(_profile), CurrentInventory) : null, headsetRefresh = HeadsetRefresh.Detect(_profile.Runtime), foreignDxgi = service.ForeignDxgi(_profile, CurrentInventory), dcsCustomIpd = CurrentInventory.DcsSettings.GetValueOrDefault("VR.custom_IPD_enable") == "true" ? CurrentInventory.DcsSettings.GetValueOrDefault("VR.custom_IPD")?.Trim('"') : null, gpu = new { nvidiaRtx = GpuInfo.Unknown || GpuInfo.HasNvidiaRtx, names = GpuInfo.Names, amdOnly = EngineOptimizations.AmdOnly(GpuInfo.Adapters()) }, status = _status, report = _report,
+            issues, cadence = Enum.IsDefined(_profile.FpsLimit) ? FramePacing.Describe(HeadsetRefresh.Resolve(_profile), CurrentInventory) : null, headsetRefresh = HeadsetRefresh.Detect(_profile.Runtime), foreignDxgi = service.ForeignDxgi(_profile, CurrentInventory), dcsCustomIpd = CurrentInventory.DcsSettings.GetValueOrDefault("VR.custom_IPD_enable") == "true" ? CurrentInventory.DcsSettings.GetValueOrDefault("VR.custom_IPD")?.Trim('"') : null, gpu = new { nvidiaRtx = GpuInfo.Unknown || GpuInfo.HasNvidiaRtx, names = GpuInfo.Names, amdOnly = EngineOptimizations.AmdOnly(GpuInfo.Adapters()), desktopFrameGeneration = GpuInfo.DesktopFrameGeneration }, status = _status, report = _report,
             plan = _plan is null ? null : new { foveaStamp = _previewFoveaStamp, files = _plan.Files.Select(f => new { f.Path, f.Purpose, bytes = f.Content.Length, replaces = f.ExpectedSha256 is not null, f.LuaChanges }), environment = _plan.LaunchEnvironment },
             // Recovery: one record of original files, restored with one action.
             originals = new { count = originals.Count + leftovers.Count, files = originals.Files.Concat(leftovers.Select(l => new OriginalItem(l.Path, l.RenameTo is null ? "remove" : "restore", false, l.Detail + "; not in the record of originals"))).ToArray(), state = originals.State, lastAction = originals.LastAction, lastActionAt = originals.LastActionAt, folder = originals.Folder },
@@ -1025,6 +1065,7 @@ internal sealed class WebBridge(ControlService service, Window? owner = null,
     /// <summary>The Pimax Play fact for checks and readiness, in Pimax Play's own units.</summary>
     private static ValidationIssue? FoveaFact(VrProfile profile)
     {
+        profile = profile.ForLaunch();
         if (PimaxFovea.UsesPimaxPlay(profile))
         {
             var resolved = PimaxFovea.Resolve(profile);

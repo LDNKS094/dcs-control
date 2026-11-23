@@ -3,11 +3,12 @@ using System.Text.Json.Serialization;
 
 namespace DcsVr.Core;
 
-public enum RuntimeKind { Pimax, SboysSteamVr }
-public enum QuadProvider { None, PimaxNative, QuadViewsFoveated }
+public enum RuntimeKind { Pimax, SboysSteamVr, Vdxr }
+public enum QuadProvider { None, PimaxNative, QuadViewsFoveated, CheekyNative }
 /// <summary>The corner of the view the in-headset panel is drawn in.</summary>
 public enum PanelPosition { UpperRight, UpperLeft, LowerRight, LowerLeft }
 public enum FrameGeneration { Off, Nvidia, FidelityFx }
+public enum VdxrFrameGeneration { Optiflow = 7, OptiflowDepth = 11, OptiflowHybrid = 16 }
 public enum GazeMode { Fixed, EyeTracked }
 public enum TrackingKind { Unknown, Slam, Lighthouse }
 public enum NeuralDepthMode { Game, Normal, Reversed }
@@ -48,8 +49,49 @@ public enum GVisionMode { Auto, Complement, Full }
 /// skip a range already prefetched within the window ([Prefetch] in DcsQvCull.ini, an engine optimization).</summary>
 public enum PrefetchFix { Off, Observe, Skip }
 
+/// <summary>Monitor rendering controls, independent of the VR backend's settings.</summary>
+public sealed record OptiScalerSettings
+{
+    public bool NeuralRendering { get; init; } = true;
+    public bool NeuralBeforeUpscaling { get; init; } = true;
+    public bool PeripheralCompression { get; init; }
+    public double Intensity { get; init; } = 1;
+    public double LocalToneStrength { get; init; } = 1;
+    public double LocalStructureStrength { get; init; } = 1;
+    public string ModelStyle { get; init; } = "Standard";
+    public bool AutomaticMask { get; init; } = true;
+    public double SkinStructureStrength { get; init; } = 1;
+    public double WorkingScale { get; init; } = 1;
+    public double ColourStrength { get; init; } = 1;
+    public double TransferStrength { get; init; } = 1;
+    public double PaperWhiteScale { get; init; } = 1;
+    public NeuralDepthMode DepthConvention { get; init; } = NeuralDepthMode.Game;
+    public int Preset { get; init; }
+    public double CenterWidth { get; init; } = 80;
+    public double CenterHeight { get; init; } = 80;
+    public double PeripheralRetention { get; init; } = 50;
+    public string OutputDisplay { get; init; } = "";
+    public bool OverrideResolution { get; init; }
+    public int OutputWidth { get; init; } = 2560;
+    public int OutputHeight { get; init; } = 1440;
+    public bool SuperResolution { get; init; } = true;
+    public string Quality { get; init; } = "Quality";
+    public bool FrameGeneration { get; init; }
+    public int FrameGenerationFactor { get; init; } = 2;
+    public bool DynamicFrameGeneration { get; init; }
+    public FpsLimitMode OutputFrameLimit { get; init; } = FpsLimitMode.MatchRefresh;
+    public int FrameRateTarget { get; init; }
+    /// <summary>The custom limit written to DCS's maxFPS setting.</summary>
+    public int RenderedFpsCap { get; init; }
+    public bool MatchDisplayRefresh { get; init; } = true;
+    public bool? VSync { get; init; }
+    public bool ShowFps { get; init; }
+    public bool LogToFile { get; init; }
+}
+
 public sealed record VrProfile
 {
+    public bool? HudAfterDlss { get; init; }
     public int SchemaVersion { get; init; } = 1;
     public string Id { get; init; } = "pimax-baseline";
     public string Name { get; init; } = "Pimax · original configuration";
@@ -60,6 +102,17 @@ public sealed record VrProfile
     /// own. The VR settings stay in the profile for the next Pimax or Sboys flight; <see cref="ForLaunch"/> is what
     /// runs.</summary>
     public bool Desktop { get; init; }
+    /// <summary>OptiScaler NR, SR and frame generation on the monitor; VR settings stay separate.</summary>
+    public bool DesktopEnhanced { get; init; }
+    public bool UsesOptiScaler => Desktop && DesktopEnhanced;
+    public bool UsesBackendRenderingLifecycle => UsesOptiScaler || (!Desktop && Runtime == RuntimeKind.Vdxr && UsesCheeky);
+    public bool UsesRenderingLifecycle => UsesBackendRenderingLifecycle || UsesReleaseIdleDlss;
+    public bool UsesVdxrQuadViews => !Desktop && Runtime == RuntimeKind.Vdxr && QuadViews == QuadProvider.CheekyNative;
+    public bool UsesDcsJointNr => UsesVdxrQuadViews && NeuralRendering && VdxrJointNr;
+    public string? VdxrMenuKey { get; init; }
+    public string? DesktopMenuKey { get; init; }
+    public bool UsesNeuralToggleKey => !Desktop && Runtime != RuntimeKind.Vdxr && NeuralRendering;
+    public OptiScalerSettings OptiScaler { get; init; } = new();
     public QuadProvider QuadViews { get; init; } = QuadProvider.PimaxNative;
     public FrameGeneration FrameGen { get; init; }
     /// <summary>Output frames per rendered frame: 2 (one generated frame), 3 (OFXR fork triple_frame_gen: two generated
@@ -102,12 +155,12 @@ public sealed record VrProfile
     public static double PassThroughShare(PassThroughPreference preference) => preference switch { PassThroughPreference.Balanced => 1.10, PassThroughPreference.PreferRefresh => 1.25, _ => 0.80 };
     /// <summary>Frame generation only when needed is in use: frame generation on, a VR flight, Generated frames Auto. A
     /// pinned 2× or 3× always generates.</summary>
-    public bool UsesAdaptiveCadence => FrameGen != FrameGeneration.Off && !Desktop && FrameGenAdaptiveCadence && FrameGenFactor == FrameGenAuto;
+    public bool UsesAdaptiveCadence => Runtime != RuntimeKind.Vdxr && FrameGen != FrameGeneration.Off && !Desktop && FrameGenAdaptiveCadence && FrameGenFactor == FrameGenAuto;
     /// <summary>HUD symbology for frame generation (engine module R95, OFXR fork patch 0049): the HUD and helmet symbols
     /// are taken out of the real frames, the generated frames are made from the world alone and the symbols put back, so
     /// they stop smearing. Needs Depth boost's dual camera (the overlay render point). "Sharp HUD" on the Framegen page, off by default.</summary>
     public bool FrameGenHudSymbology { get; init; }
-    public bool UsesHudSymbology => FrameGenHudSymbology && FrameGen != FrameGeneration.Off && !Desktop && UsesDepthBoost;
+    public bool UsesHudSymbology => Runtime != RuntimeKind.Vdxr && FrameGenHudSymbology && FrameGen != FrameGeneration.Off && !Desktop && UsesDepthBoost;
     /// <summary>OFXR smooth_cursor (fork patch 0010): generated frames find DCS's mouse cursor in the two real frames
     /// and draw it at its in-between position, so it moves at the headset's rate instead of fading between two places.
     /// Only the generated frames change; where a click lands does not. Off by default until flown.</summary>
@@ -131,6 +184,36 @@ public sealed record VrProfile
     /// the local contrast the enlargement takes (dcsvr_periphery_sharpen; 0 = off).</summary>
     public double QuadPeripheryContrast { get; init; } = 0.3;
     public double QuadEdgeBlend { get; init; } = 0.2;
+    public int VdxrFocusWidth { get; init; } = 50;
+    public int VdxrFocusHeight { get; init; } = 50;
+    public bool VdxrFocusCustomBlend { get; init; }
+    public int VdxrFocusCornerRadius { get; init; } = 10;
+    public int VdxrFocusFeather { get; init; } = 10;
+    public bool VdxrFocusMatchColor { get; init; }
+    public bool VdxrFocusMatchStereo { get; init; }
+    public double VdxrFocusReferenceDistance { get; init; } = 1;
+    public bool VdxrJointNr { get; init; } = true;
+    public bool VdxrNrFocusStability { get; init; } = true;
+    public int VdxrNrPreset { get; init; }
+    public VdxrFrameGeneration VdxrFrameGenMethod { get; init; } = VdxrFrameGeneration.OptiflowHybrid;
+    public bool VdxrFgDepthGuidance { get; init; }
+    public bool VdxrFgDepthSplat { get; init; }
+    public bool VdxrCenterSr { get; init; }
+    public int VdxrCenterPreset { get; init; }
+    public double VdxrCenterSupersampling { get; init; } = 1;
+    public bool VdxrAutomaticSr { get; init; }
+    public int VdxrSrThreshold { get; init; } = 80;
+    public bool VdxrAutomaticNr { get; init; }
+    public int VdxrNrThreshold { get; init; } = 80;
+    public bool UsesVdxrCenterSr => UsesVdxrQuadViews && VdxrCenterSr;
+    public bool VdxrFocusHeadOffset { get; init; }
+    public const double VdxrFocusMaxBias = 45;
+    public double VdxrFocusHorizontalBias { get; init; }
+    public double VdxrFocusHorizontalAngleGain { get; init; } = .15;
+    public double VdxrFocusHorizontalDeadzone { get; init; } = 1;
+    public double VdxrFocusVerticalBias { get; init; }
+    public double VdxrFocusVerticalAngleGain { get; init; } = .15;
+    public double VdxrFocusVerticalDeadzone { get; init; } = 1;
     /// <summary>Quad Views focus area as the circle inscribed in the focus view, fading out radially over QuadEdgeBlend down
     /// to nothing (focus_view_shape=2); off keeps a rectangle with slightly rounded corners (focus_view_shape=8) that fades
     /// out the same way, instead of upstream's rectangle whose fade stops at 50 % and leaves a visible step.</summary>
@@ -206,7 +289,7 @@ public sealed record VrProfile
     public bool HeadsetPanel { get; init; }
     /// <summary>The in-headset panel can be shown in this flight (its key works).</summary>
     /// Without frame generation OFXR is loaded for the panel only when it can be shown: its key is set, or it is visible at start.
-    public bool UsesHeadsetPanel => !Desktop && (FrameGen != FrameGeneration.Off || (HeadsetPanel && (DiagnosticOverlayAtStart || (NeuralHotkeys.TryParse(DiagnosticOverlayKey ?? NeuralHotkeys.DiagnosticDefault, out var key) && !key.IsOff))));
+    public bool UsesHeadsetPanel => !Desktop && Runtime != RuntimeKind.Vdxr && (FrameGen != FrameGeneration.Off || (HeadsetPanel && (DiagnosticOverlayAtStart || (NeuralHotkeys.TryParse(DiagnosticOverlayKey ?? NeuralHotkeys.DiagnosticDefault, out var key) && !key.IsOff))));
     /// <summary>OFXR's in-headset VRAM counter (diag_vram in its ini); off by default.</summary>
     public bool DiagnosticVram { get; init; }
     public double NeuralMotionScaleX { get; init; } = 1;
@@ -338,9 +421,8 @@ public sealed record VrProfile
     /// change. Monitor and VR alike; an engine feature, so not in the Perception-only mode. On by default since 0.6.5
     /// (off until 0.6.4), also for a profile saved without the field.</summary>
     public bool EngineReleaseIdleDlss { get; init; } = true;
-    /// <summary>It runs: <see cref="EngineReleaseIdleDlss"/> with Engine Optimizations (the module's worker ticks the
-    /// DLSS release only outside its Perception-only mode; the in-flight engine switch pauses it).</summary>
-    public bool UsesReleaseIdleDlss => EngineReleaseIdleDlss && EngineOptimizations;
+    /// <summary>Enables the native NGX release provider. Managed backends supply their own release provider.</summary>
+    public bool UsesReleaseIdleDlss => EngineReleaseIdleDlss && EngineOptimizations && !UsesBackendRenderingLifecycle;
     /// <summary>[Model] ShadowRecorder: the shadow cascades' draws are recorded on 8 worker threads (D3D11 deferred
     /// contexts) instead of DCS's render thread; cascade 1 stays as DCS draws it. Verified texel-identical live;
     /// measured +3 to +5 % FPS, p95 −4 to −7 %, at 4-7 % more total CPU and about 30 MB of memory.</summary>
@@ -464,12 +546,10 @@ public sealed record VrProfile
     /// gaze alone moves nothing and leaves DCS's IPD as it is.</summary>
     public bool UsesLayerEyeDistance => UsesPupilShift || UsesDepthBoost;
     /// <summary>The engine module measures the scene depth at the gaze (DcsQvCull.ini [Perception] FixationDepth=1)
-    /// whenever Depth boost runs, with or without the engine optimizations.</summary>
-    public bool UsesFixationDepth => UsesDepthBoost;
-    /// <summary>The engine module is installed: for Engine Optimizations, or for Depth boost's dual camera and scene
-    /// depth or a Visual realism feature alone, in its Perception-only mode ([General] PerceptionOnly=1: none of the
-    /// engine optimizations, no test suite or engine keys).</summary>
-    public bool UsesEngineModule => EngineOptimizations || UsesDepthBoost || UsesVisualRealism;
+    /// for Depth boost or uses the same render boundary for joint NR.</summary>
+    public bool UsesFixationDepth => UsesDepthBoost || UsesDcsJointNr;
+    /// <summary>Rendering features can use the engine module in its Perception-only mode.</summary>
+    public bool UsesEngineModule => EngineOptimizations || UsesFixationDepth || UsesVisualRealism;
     /// <summary>The eye distance DCS renders with. Headset (default): the IPD the headset measured or was set to, the
     /// realistic one; DCS's custom IPD is turned off while the profile is applied. DcsCustom: DCS's own custom IPD as it
     /// is (the pupil shift layer applies it itself when it runs). Manual: <see cref="EyeDistanceMm"/>. VR flights only;
@@ -572,8 +652,9 @@ public sealed record VrProfile
     public bool BoostHelperElevated => (CpuBoost && BoostElevated) || UsesTobiiPause;
     /// <summary>Foveated Super Resolution actually runs: only in stereo, without Quad Views.</summary>
     public bool UsesFoveatedDlss => FoveatedDlss && QuadViews == QuadProvider.None;
-    public bool UsesCheeky => UsesFoveatedDlss || NeuralRendering;
-    public bool UsesQuadFocus => UsesCheeky && QuadViews == QuadProvider.QuadViewsFoveated && QuadFocusAdapter;
+    public bool UsesCheekyFrameGeneration => !Desktop && Runtime == RuntimeKind.Vdxr && FrameGen != FrameGeneration.Off;
+    public bool UsesCheeky => UsesFoveatedDlss || NeuralRendering || UsesCheekyFrameGeneration || (!Desktop && Runtime == RuntimeKind.Vdxr && QuadViews == QuadProvider.CheekyNative);
+    public bool UsesQuadFocus => Runtime != RuntimeKind.Vdxr && UsesCheeky && QuadViews == QuadProvider.QuadViewsFoveated && QuadFocusAdapter;
     /// <summary>Central DLSS 5 area actually written to Cheeky: only with the focus adapter and DLSS 5 on.</summary>
     public bool UsesCentralNeuralArea => UsesQuadFocus && NeuralRendering && NeuralFocusArea < 100;
     public bool UsesNeuralEdgeFade => UsesQuadFocus && NeuralRendering && NeuralFocusArea >= 100 && QuadNeuralEdgeFade && QuadEdgeBlend > 0;
@@ -616,6 +697,7 @@ public sealed record InventorySnapshot
     public string? ActiveRuntime { get; init; }
     public string? PimaxRuntime { get; init; }
     public string? SteamVrRuntime { get; init; }
+    public string? VdxrRuntime { get; init; }
     public string? PimaxVersion { get; init; }
     public bool DcsRunning { get; init; }
     public TrackingKind Tracking { get; init; }

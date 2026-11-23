@@ -95,7 +95,9 @@ public sealed class ControlService(string distributionRoot, string stateRoot)
 
     /// <summary>True when DLSS 5 is on and the profile names no runtime file that exists, so the saved copy is used.</summary>
     public static bool UsesSavedRuntime(VrProfile profile) =>
-        profile.NeuralRendering && (string.IsNullOrWhiteSpace(profile.NeuralRuntimePath) || !File.Exists(profile.NeuralRuntimePath));
+        (profile.NeuralRendering || profile.UsesOptiScaler) && (string.IsNullOrWhiteSpace(profile.NeuralRuntimePath) || !File.Exists(profile.NeuralRuntimePath));
+
+    public string BundledNeuralRuntime => Path.Combine(DistributionRoot, OptiScalerBackend.ComponentFolder, "OptiScaler", NeuralRuntimeStore.FileName);
 
     /// <summary>The profile with the saved runtime copy filled in when it has no runtime path of its own (or one that no
     /// longer exists). Profiles keep a null path, meaning "use the saved copy"; only checks and deployment see it filled.</summary>
@@ -104,9 +106,10 @@ public sealed class ControlService(string distributionRoot, string stateRoot)
     public VrProfile ResolveNeuralRuntime(VrProfile profile, out string? savedSha256)
     {
         savedSha256 = null;
-        if (!profile.NeuralRendering) return profile;
+        if (!(profile.NeuralRendering || profile.UsesOptiScaler)) return profile;
         var store = SavedRuntime;
         if (UsesSavedRuntime(profile) && store.Current() is { } saved) profile = profile with { NeuralRuntimePath = saved.Path };
+        if (UsesSavedRuntime(profile) && File.Exists(BundledNeuralRuntime)) profile = profile with { NeuralRuntimePath = BundledNeuralRuntime };
         if (!string.IsNullOrWhiteSpace(profile.NeuralRuntimePath) && Path.GetFullPath(profile.NeuralRuntimePath).Equals(store.DllPath, StringComparison.OrdinalIgnoreCase))
             savedSha256 = store.Read()?.Sha256;
         return profile;
@@ -145,13 +148,13 @@ public sealed class ControlService(string distributionRoot, string stateRoot)
     public ForeignDxgi? ForeignDxgi(VrProfile profile, InventorySnapshot inventory)
     {
         var launch = profile.ForLaunch();
-        if (!launch.UsesCheeky || inventory.DcsExecutable is not { } exe || Path.GetDirectoryName(exe) is not { } bin) return null;
+        if (!(launch.UsesCheeky || launch.UsesOptiScaler) || inventory.DcsExecutable is not { } exe || Path.GetDirectoryName(exe) is not { } bin) return null;
         var path = Path.Combine(bin, "dxgi.dll");
         try
         {
             if (!File.Exists(path)) return null;
             var hash = Hashing.FileSha256(path);
-            var ours = new[] { "components/cheeky/dxgi.dll", "components/cheeky-focus/dxgi.dll" }.Select(p => Path.Combine(DistributionRoot, p)).Where(File.Exists).Select(Hashing.FileSha256);
+            var ours = new[] { "components/cheeky/dxgi.dll", "components/cheeky-focus/dxgi.dll", OptiScalerBackend.ComponentFolder + "/dxgi.dll" }.Select(p => Path.Combine(DistributionRoot, p)).Where(File.Exists).Select(Hashing.FileSha256);
             var installed = ReadAppliedProfile()?.Journal.Entries.Any(e => string.Equals(e.Path, path, StringComparison.OrdinalIgnoreCase) && e.InstalledSha256 == hash) == true;
             if (installed || ours.Contains(hash, StringComparer.OrdinalIgnoreCase)) return null;
             var info = FileVersionInfo.GetVersionInfo(path);
@@ -168,13 +171,15 @@ public sealed class ControlService(string distributionRoot, string stateRoot)
     /// </summary>
     public byte[]? ChainedDxgi(VrProfile profile, InventorySnapshot inventory)
     {
-        if (!profile.KeepOtherDxgi || !profile.ForLaunch().UsesCheeky || inventory.DcsExecutable is not { } exe || Path.GetDirectoryName(exe) is not { } bin) return null;
+        var launch = profile.ForLaunch();
+        if (!profile.KeepOtherDxgi || !(launch.UsesCheeky || launch.UsesOptiScaler) || inventory.DcsExecutable is not { } exe || Path.GetDirectoryName(exe) is not { } bin) return null;
         try
         {
             var originals = Originals.Read().Files;
             OriginalFile? Recorded(string name) => originals.FirstOrDefault(f => string.Equals(Path.GetFullPath(f.Path), Path.GetFullPath(Path.Combine(bin, name)), StringComparison.OrdinalIgnoreCase));
-            var second = Path.Combine(bin, "dxgi2.dll");
-            if (File.Exists(second) && Recorded("dxgi2.dll") is not { Foreign: false }) return null;
+            var name = launch.UsesOptiScaler ? OptiScalerBackend.ChainedName : "dxgi2.dll";
+            var second = Path.Combine(bin, name);
+            if (File.Exists(second) && Recorded(name) is not { Foreign: false }) return null;
             if (ForeignDxgi(profile, inventory) is { } now) return File.ReadAllBytes(now.Path);
             return Recorded("dxgi.dll") is { Foreign: true, BackupFile: { } backup } ? File.ReadAllBytes(PathPolicy.UnderRoot(Originals.Directory, backup)) : null;
         }
@@ -214,8 +219,8 @@ public sealed class ControlService(string distributionRoot, string stateRoot)
             {
                 if (!profile.UsesQuadFocus)
                 {
-                    // Unmodified upstream Cheeky 0.5.4 binaries, extracted at build time from the pinned archive without version.dll.
-                    cheeky = Path.Combine(DistributionRoot, "components/cheeky");
+                    // VDXR uses the matching upstream FG build; existing routes retain their pinned Cheeky components.
+                    cheeky = Path.Combine(DistributionRoot, profile.Runtime == RuntimeKind.Vdxr ? "components/cheeky-vdxr" : "components/cheeky");
                     foreach (var filename in new[] { "dxgi.dll", "CheekyFoveatedDLSS/CheekyFoveatedDLSSHost.dll", "CheekyFoveatedDLSS/CheekyFoveatedDLSSRuntime.dll" })
                     {
                         var path = PathPolicy.UnderRoot(cheeky, filename);
@@ -223,7 +228,7 @@ public sealed class ControlService(string distributionRoot, string stateRoot)
                             throw new InvalidDataException("The Cheeky components are modified or incomplete.");
                     }
                 }
-                layer = Path.Combine(DistributionRoot, "components/CheekyOpenXRLayer.dll");
+                layer = Path.Combine(DistributionRoot, profile.Runtime == RuntimeKind.Vdxr ? "components/cheeky-vdxr/CheekyOpenXRLayer.dll" : "components/CheekyOpenXRLayer.dll");
                 var expected = File.ReadAllText(layer + ".sha256").Trim();
                 if (Hashing.FileSha256(layer) != expected) throw new InvalidDataException("Cheeky layer is modified or incomplete.");
             }
@@ -249,7 +254,7 @@ public sealed class ControlService(string distributionRoot, string stateRoot)
             }
             string? ofxrLayer = null;
             // OFXR for frame generation, or for the in-headset panel alone (the fork draws it; the upstream package has none).
-            if (profile.FrameGen != FrameGeneration.Off || profile.UsesHeadsetPanel)
+            if ((!profile.UsesCheekyFrameGeneration && profile.FrameGen != FrameGeneration.Off) || profile.UsesHeadsetPanel)
             {
                 // OFXR from the djules75 fork (DCS-compatible); see ComponentLocations.
                 ofxrLayer = Path.Combine(DistributionRoot, "components/ofxr/XR_APILAYER_XRFrameBridge_diagnostic.dll");
@@ -280,7 +285,11 @@ public sealed class ControlService(string distributionRoot, string stateRoot)
                 if (!File.Exists(pupilShift) || !File.Exists(pupilShift + ".sha256") || Hashing.FileSha256(pupilShift) != File.ReadAllText(pupilShift + ".sha256").Trim())
                     throw new InvalidDataException("The pupil shift layer is modified or incomplete.");
             }
-            return new DeploymentPlanner(new(ofxr, cheeky, layer, quad, focus, ofxrLayer, engine, pupilShift)).Build(profile, inventory, ManagedRoot, draft, appliedFovea, ownedSettings, savedNeuralSha, ChainedDxgi(profile, inventory), ShaderCacheDirectoryFor(inventory.OptionsPath));
+            var desktop = profile.UsesOptiScaler ? Path.Combine(DistributionRoot, OptiScalerBackend.ComponentFolder) : null;
+            var dcsRender = profile.UsesRenderingLifecycle ? Path.Combine(DistributionRoot, "components/dcsrender") : null;
+            var autoexec = Path.Combine(Path.GetDirectoryName(Path.GetFullPath(inventory.OptionsPath!))!, "autoexec.cfg");
+            var autoexecOriginal = Originals.Read().Files.FirstOrDefault(f => f.Path.Equals(autoexec, StringComparison.OrdinalIgnoreCase));
+            return new DeploymentPlanner(new(ofxr, cheeky, layer, quad, focus, ofxrLayer, engine, pupilShift, desktop, dcsRender)).Build(profile, inventory, ManagedRoot, draft, appliedFovea, ownedSettings, savedNeuralSha, ChainedDxgi(profile, inventory), ReadOptiScalerConfiguration(profile), autoexecOriginal, ShaderCacheDirectoryFor(inventory.OptionsPath));
         }
         string Import(string id)
         {
@@ -292,12 +301,38 @@ public sealed class ControlService(string distributionRoot, string stateRoot)
 
     internal static readonly string[] EngineFiles = ["DcsQvCull.dll", "DcsQvCullPayload.dll", "DcsQvCull.lua"];
 
+    private string? ReadOptiScalerConfiguration(VrProfile profile)
+    {
+        if (!profile.UsesOptiScaler) return null;
+        // Preview reads the menu's latest values. A different profile reads its own saved copy.
+        var applied = ReadAppliedProfile();
+        if (applied?.Profile.UsesOptiScaler == true && applied.Profile.Id == profile.Id)
+        {
+            var ini = applied.Journal.Entries.Single(e => Path.GetFileName(e.Path).Equals(OptiScalerBackend.IniName, StringComparison.OrdinalIgnoreCase));
+            return IniFile.Decode(File.ReadAllBytes(ini.Path));
+        }
+        var saved = OptiScalerBackend.SavedPath(ManagedRoot, profile.Id);
+        return File.Exists(saved) ? IniFile.Decode(File.ReadAllBytes(saved)) : null;
+    }
+
+    private void SaveOptiScalerConfiguration()
+    {
+        var applied = ReadAppliedProfile();
+        if (applied?.Profile.UsesOptiScaler != true) return;
+        var ini = applied.Journal.Entries.Single(e => Path.GetFileName(e.Path).Equals(OptiScalerBackend.IniName, StringComparison.OrdinalIgnoreCase));
+        PathPolicy.RejectReparsePoints(ini.Path, ini.Root);
+        var saved = OptiScalerBackend.SavedPath(ManagedRoot, applied.Profile.Id);
+        PathPolicy.RejectReparsePoints(saved, ManagedRoot);
+        AtomicFile.Write(saved, File.ReadAllBytes(ini.Path));
+    }
+
     /// <summary>Writes the plan over whatever is installed (see <see cref="OriginalsStore.Apply"/>). Refused only while a
     /// running DCS could use the files.</summary>
     public OriginalsApply Apply(ApplyPlan plan)
     {
         var originals = Originals;
         EnsureDcsClosed(plan.Files.Select(f => f.Path).Append(plan.Executable).Concat(originals.Read().Files.Select(f => f.Path)), ManagedRoot);
+        SaveOptiScalerConfiguration();
         var applied = originals.Apply(plan);
         // The engine module's shader cache moved to the state folder: entries an earlier version left in the module's
         // folder follow it, so this update does not start with an empty cache (DCS is closed here).
@@ -335,6 +370,7 @@ public sealed class ControlService(string distributionRoot, string stateRoot)
     {
         var originals = Originals;
         EnsureDcsClosed(originals.Read().Files.Select(f => f.Path).Concat(LeftoverFiles(dcsExecutable, optionsPath).Select(f => f.Path)).Append(ManagedRoot), ManagedRoot);
+        SaveOptiScalerConfiguration();
         var result = originals.RestoreOriginals();
         if (result.Complete && LeftoverFiles(dcsExecutable, optionsPath) is { Count: > 0 } leftovers)
         {
