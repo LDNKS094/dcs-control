@@ -25,6 +25,7 @@
 #include <cstdio>
 #include <cstring>
 #include <deque>
+#include <functional>
 #include <map>
 #include <set>
 #include <mutex>

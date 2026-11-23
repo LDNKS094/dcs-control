@@ -33,6 +33,10 @@ int CountOf(const std::string& s, const char* what) {
   return n;
 }
 void TickRel(bool instrument, bool killed, bool release, int n = 300) {
+  dlssv::life::g_nativeReleasePolicy = [](uint32_t views, uint64_t evaluations, uint64_t minimum,
+                                         bool settled, bool superseded, bool reused) {
+    return DcsRender::DecideNativeRelease(true, views, evaluations, minimum, settled, superseded, reused);
+  };
   dlssv::Tick(0, 0, false, killed, instrument, release, n);
 }
 

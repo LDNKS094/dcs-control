@@ -69,6 +69,8 @@
 // Needs (included by main.cpp before its anonymous namespace): <string>, <vector>, <atomic>, <mutex>, <intrin.h>.
 #pragma once
 
+#include "../../dcsrender/src/release_policy.h"
+
 namespace dlssv {
 
 // ---- NGX / NvAPI constants (the DLSS SDK 310.9.16 headers and NvApiDriverSettings.h) ------------------------------
@@ -716,6 +718,7 @@ CapParamsFn g_testCapParams = nullptr;
 // R132 ([DLSS] ReleaseIdleSets; the rule in the "R132" section below).
 bool g_verbose = false;                  // Instrument=1: summaries (the release key alone tracks without them)
 std::atomic<bool> g_relOn{false};        // ReleaseIdleSets=1, kill switch off, not latched, not stopping
+DcsRender::NativeReleasePolicy g_nativeReleasePolicy = nullptr;  // Published before g_relOn.
 bool g_relKey = false;                   // ReleaseIdleSets=1 (worker)
 std::atomic<uint64_t> g_relN{kRuleMinEvals};
 std::atomic<bool> g_relLatched{false};   // a fault, a failed release, a refused evaluate or a full guard: off for the session
@@ -1441,7 +1444,6 @@ void ReleaseStepImpl(int64_t now, RelOut* o) {
   const uint32_t newest = g_set;
   const uint64_t need = g_relN.load();
   const uint32_t gen = g_gateGen.load(std::memory_order_acquire);
-  // Proof: every live handle of the newest set evaluated >= N times since the last event.
   uint64_t mn = 0;
   uint32_t nh = 0;
   for (uint32_t i = 0; i < n; ++i) {
@@ -1452,7 +1454,9 @@ void ReleaseStepImpl(int64_t now, RelOut* o) {
     ++nh;
   }
   o->newest = newest, o->newestMin = mn;
-  if (!nh || mn < need || now - g_lastCreate <= Ticks(kLoadDoneSec)) return;  // (the load closes 2 s after its last creation)
+  const bool settled = now - g_lastCreate > Ticks(kLoadDoneSec);
+  const auto decide = g_nativeReleasePolicy;
+  if (decide(nh, mn, need, settled, true, false) != DcsRender::Retire) return;
   o->proof = true;
   // The oldest candidate set.
   for (uint32_t s = 1; s < newest; ++s) {
@@ -1466,7 +1470,9 @@ void ReleaseStepImpl(int64_t now, RelOut* o) {
       used = used || f.evalsAfterSuper.load() != 0;
       refused = refused || f.refused;
     }
-    if (!cnt || unsup || refused || cnt > 16) continue;
+    if (!cnt || refused || cnt > 16) continue;
+    const auto decision = decide(nh, mn, need, settled, !unsup, used);
+    if (decision == DcsRender::Wait) continue;
     o->set = s, o->count = 0, o->lifetime = 0, o->after = 0, o->lastEval = 0;
     for (uint32_t i = 0; i < n; ++i) {
       Feat& f = g_f[i];
@@ -1477,9 +1483,9 @@ void ReleaseStepImpl(int64_t now, RelOut* o) {
       o->lifetime += f.evals.load();
       o->after += f.evalsAfterSuper.load();
       o->lastEval = (std::max)(o->lastEval, f.lastEval.load());
-      if (used) f.refused = true;
+      if (decision == DcsRender::Refuse) f.refused = true;
     }
-    if (used) {  // the guard before
+    if (decision == DcsRender::Refuse) {
       o->what = 2;
       return;
     }
@@ -1638,7 +1644,7 @@ int __cdecl EvalHook(void* ctx, const void* h, const NgxParam* p, void* cb) {
   g_inFlight.fetch_sub(1, std::memory_order_seq_cst);
   if (g_on.load(std::memory_order_relaxed)) {
     const int i = CountEval(h, r);
-    if (r == kNgxSuccess && g_relOn.load(std::memory_order_relaxed)) MaybeRelease(i);
+    if (r == kNgxSuccess && g_relOn.load(std::memory_order_acquire)) MaybeRelease(i);
   }
   return r;
 }
@@ -1706,6 +1712,12 @@ void Install() {
 // Worker tick: the keys, the kill switch, a closed load's totals, the 10 s summary (Instrument only). R132: release
 // (ReleaseIdleSets) turns the tracking on too; releasing needs both observation hooks and the guard block.
 void Tick(bool key, bool killed, bool release = false, int releaseAfter = static_cast<int>(kRuleMinEvals)) {
+  if (release && !g_nativeReleasePolicy) {
+    HMODULE adapter = nullptr;
+    if (GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_PIN, L"DcsRender.dll", &adapter))
+      g_nativeReleasePolicy = reinterpret_cast<DcsRender::NativeReleasePolicy>(
+          GetProcAddress(adapter, "DcsRender_DecideNativeReleaseV1"));
+  }
   g_key = key;
   g_verbose = key;
   g_relKey = release;
@@ -1718,7 +1730,7 @@ void Tick(bool key, bool killed, bool release = false, int releaseAfter = static
         "a summary every %.0f s and at each mission load", kSummarySec);
   }
   // R132: releasing.
-  const bool canRel = on && release && !g_relLatched.load() && !g_noMore.load() && g_evalState.load() == 1 &&
+  const bool canRel = on && release && g_nativeReleasePolicy && !g_relLatched.load() && !g_noMore.load() && g_evalState.load() == 1 &&
                       g_releaseState.load() == 1;
   bool relNow = false;
   if (canRel) {
@@ -1796,6 +1808,7 @@ void ResetForTest() {
   std::lock_guard<std::mutex> lock(g_mx);
   for (auto& f : g_f) ResetEntry(f);
   g_n = 0, g_on = false, g_key = false;
+  g_nativeReleasePolicy = nullptr;
   g_evalTotal = g_evalFail = g_untracked = g_evalFault = g_releases = g_dropped = 0;
   g_evalState = 0, g_releaseState = 0;
   g_eval = Detour{"NVSDK_NGX_D3D11_EvaluateFeature"};

@@ -53,6 +53,9 @@ std::atomic<BoundaryFn> g_viewBoundary{nullptr};
 // a view's G-buffer passes), called after every other one at a start and
 // after every other one at an end; nullptr unless [Perception] FixationDepth.
 std::atomic<BoundaryFn> g_depthBoundary{nullptr};
+using ExecuteOverrideFn=bool(*)(void* pass,uint64_t frame);
+std::atomic<ExecuteOverrideFn> g_executeOverride{nullptr};
+thread_local bool t_executeDelayedPass=false;
 // R139: vrs_probe.h's two callbacks, only while its suite phase runs (nullptr otherwise): g_vrsPre before every other
 // callback at a pass start; g_vrsBoundary after every other one at a start and before every other one at an end. So
 // no other feature's boundary work runs under the probe's shading-rate state. g_vrsPre is set only with g_vrsBoundary.
@@ -99,6 +102,7 @@ std::vector<TlEvent> g_tl;
 size_t g_tlCap = 0;
 
 void __fastcall Hook(void* pass, uint64_t frame) {
+  if(t_executeDelayedPass)return g_orig(pass,frame);
   if (t_depth == 0) {
     qvalog::NoteFrameThread();  // R93: the render thread (main.cpp's async log: its lines never wait)
     g_topTid.store(GetCurrentThreadId(), std::memory_order_relaxed);
@@ -110,11 +114,12 @@ void __fastcall Hook(void* pass, uint64_t frame) {
   BoundaryFn vb = g_viewBoundary.load(std::memory_order_relaxed);
   BoundaryFn db = g_depthBoundary.load(std::memory_order_relaxed);
   BoundaryFn vr = g_vrsBoundary.load(std::memory_order_relaxed);  // R139
+  const auto executeOverride=g_executeOverride.load(std::memory_order_relaxed);
   BoundaryFn cs = g_censusBoundary.load(std::memory_order_relaxed);  // chain_derive.h
   BoundaryFn pc = g_pcBoundary.load(std::memory_order_relaxed);      // periph_census.h
   if (!g_recording.load(std::memory_order_relaxed)) {
     AfterTopFn after = g_afterTop.load(std::memory_order_relaxed);
-    if (!after && !each && !bnd && !fl && !vb && !db && !vr && !cs && !pc) return g_orig(pass, frame);
+    if (!after && !each && !bnd && !fl && !vb && !db && !vr && !cs && !pc && !executeOverride) return g_orig(pass, frame);
     BoundaryFn vp = vr ? g_vrsPre.load(std::memory_order_relaxed) : nullptr;
     if (vp) vp(pass, true, t_depth);
     if (each) each();
@@ -126,7 +131,7 @@ void __fastcall Hook(void* pass, uint64_t frame) {
     if (pc) pc(pass, true, t_depth);
     if (vr) vr(pass, true, t_depth);
     ++t_depth;
-    g_orig(pass, frame);
+    if(!executeOverride||!executeOverride(pass,frame))g_orig(pass, frame);
     const bool top = --t_depth == 0;
     if (vr) vr(pass, false, t_depth);
     if (pc) pc(pass, false, t_depth);
@@ -153,7 +158,7 @@ void __fastcall Hook(void* pass, uint64_t frame) {
   if (d < 64) t_childUs[d] = 0;
   LARGE_INTEGER a, b;
   QueryPerformanceCounter(&a);
-  g_orig(pass, frame);
+  if(!executeOverride||!executeOverride(pass,frame))g_orig(pass, frame);
   QueryPerformanceCounter(&b);
   t_depth--;
   double us = (b.QuadPart - a.QuadPart) * g_qpcToUs;

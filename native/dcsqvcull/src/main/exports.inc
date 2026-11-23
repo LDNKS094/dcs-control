@@ -125,6 +125,26 @@ extern "C" __declspec(dllexport) void DcsQvPayload_SetDualCameraStatusWord(std::
   g_dualStatusSink.Attach(word);
 }
 
+// Temporary cross-layer capture token; only atomics are read from xrEndFrame.
+extern "C" __declspec(dllexport) BOOL __cdecl DcsQvPayload_GetCaptureStateV1(uint64_t* frame,uint32_t* view,BOOL* selected) {
+  return fixdepth::scapture::CaptureState(frame,view,selected)?TRUE:FALSE;
+}
+extern "C" __declspec(dllexport) BOOL __cdecl DcsQvPayload_GetPreLdrSceneV1(uint64_t frame,uint32_t view,ID3D11Texture2D** texture) {
+  return fixdepth::scapture::PreLdrScene(frame,view,texture)?TRUE:FALSE;
+}
+extern "C" __declspec(dllexport) BOOL __cdecl DcsQvPayload_GetProjectedUiV1(uint64_t frame,uint32_t view,ID3D11Texture2D** texture) {
+  return fixdepth::scapture::ProjectedUi(frame,view,texture)?TRUE:FALSE;
+}
+extern "C" __declspec(dllexport) void __cdecl DcsQvPayload_SetUiEnabledV1(BOOL enabled) {
+  fixdepth::scapture::EnableUi(enabled!=FALSE);
+}
+extern "C" __declspec(dllexport) void __cdecl DcsQvPayload_SetStageReplayEnabledV1(BOOL enabled) {
+  fixdepth::scapture::EnableStageReplay(enabled!=FALSE);
+}
+extern "C" __declspec(dllexport) BOOL __cdecl DcsQvPayload_AcquireStageReplayV1(uint64_t frame,uint32_t view,CheekyStageReplayViewV1* out) {
+  return fixdepth::scapture::AcquireStageReplay(frame,view,out)?TRUE:FALSE;
+}
+
 // Optional exports for the loader's Lua callbacks (loader_api.h).
 extern "C" __declspec(dllexport) int DcsQvPayload_Quiesce(uint32_t timeoutMs) {
   return QuiesceForExit(timeoutMs) ? 1 : 0;

@@ -1,0 +1,1039 @@
+diff --git a/openxr_layer/quad_capture.hpp b/openxr_layer/quad_capture.hpp
+index a7008fb..e9b27e6 100644
+--- a/openxr_layer/quad_capture.hpp
++++ b/openxr_layer/quad_capture.hpp
+@@ -63,6 +63,7 @@ struct LocatedFocus {
+     QuadFocusSettings settings;
+     FocusShift shift;
+     std::array<std::array<float,2>,2> sizes;
++    std::array<XrFovf,2> context;
+ };
+ 
+ inline void locate_focus(LocatedFocus& focus,const std::array<XrView,2>& views) {
+diff --git a/openxr_layer/quad_capture.inl b/openxr_layer/quad_capture.inl
+index ed3ca59..2a141df 100644
+--- a/openxr_layer/quad_capture.inl
++++ b/openxr_layer/quad_capture.inl
+@@ -191,6 +191,7 @@ XrResult quad_capture_locate(XrSession session,const XrViewLocateInfo* info,XrVi
+             located.shift=owner.quad_head_focus.update(stereo,*info,located.settings,options.reference_revision);
+         }
+         cheeky::quad_capture::locate_focus(located,stereo);
++        for(unsigned eye=0;eye<2;++eye)located.context[eye]=stereo[eye].fov;
+         focus=located;
+         while(history.size()>32)history.erase(history.begin());
+     }else cheeky::quad_capture::locate_focus(focus,stereo);}
+@@ -560,6 +561,23 @@ extern "C" __declspec(dllexport) uint32_t __cdecl CheekyQuad_GetViewsV1(CheekyQu
+         *output=value;return 1;
+     }catch(...){return 0;}
+ }
++extern "C" __declspec(dllexport) bool __cdecl CheekyQuad_GetFocusSamplingV1(
++    uint64_t generation,int64_t time,unsigned eye,float* inset,float* blend) noexcept {
++    if(eye>=2)return false;
++    std::lock_guard lock(state_mutex);
++    for(const auto& [handle,owner]:sessions)if(owner.running&&owner.generation==generation&&owner.quad_capture){
++        const auto located=owner.quad_capture_fovs.find(time);
++        if(located==owner.quad_capture_fovs.end())return false;
++        const auto& focus=located->second;
++        const auto rect=cheeky::quad_capture::inset_rect(focus.context[eye],focus.eyes[eye]);
++        const auto& extent=owner.quad_capture->recommended[eye];
++        const auto weights=quad_focus_blend(focus.settings,rect,extent.recommendedImageRectWidth,extent.recommendedImageRectHeight);
++        std::copy(rect.begin(),rect.end(),inset);
++        std::copy(weights.begin(),weights.end(),blend);
++        return true;
++    }
++    return false;
++}
+ extern "C" __declspec(dllexport) void* __cdecl CheekyQuad_AcquireD3D11V1(void* context) noexcept {
+     if(!context)return nullptr;
+     Microsoft::WRL::ComPtr<ID3D11Device> device;static_cast<ID3D11DeviceContext*>(context)->GetDevice(&device);
+diff --git a/src/d3d11_d3d12_transport.cpp b/src/d3d11_d3d12_transport.cpp
+index bcc7833..6727536 100644
+--- a/src/d3d11_d3d12_transport.cpp
++++ b/src/d3d11_d3d12_transport.cpp
+@@ -19,6 +19,9 @@
+ #include "d3d_shaders.hpp"
+ #include "crop_motion.hpp"
+ #include "transport_geometry.hpp"
++#include "dcs_joint_nr_sources.hpp"
++#include "dcs_joint_nr_warp.hpp"
++#include <d3dcompiler.h>
+ #include <dxgi1_4.h>
+ 
+ #include <algorithm>
+@@ -162,6 +165,15 @@ struct SharedTexture {
+     DXGI_FORMAT format{DXGI_FORMAT_UNKNOWN};
+     D3D12_RESOURCE_FLAGS flags{};
+ };
++struct JointTexture : SharedTexture {
++    Microsoft::WRL::ComPtr<ID3D11UnorderedAccessView> packUav;
++    Microsoft::WRL::ComPtr<ID3D11ShaderResourceView> readSrv;
++};
++struct JointNrTextures {
++    JointTexture input,working,depth,motion;
++    Microsoft::WRL::ComPtr<ID3D12DescriptorHeap> descriptors;
++};
++void release_joint_textures(JointNrTextures& textures) noexcept;
+ 
+ struct TransportSlot {
+     SharedTexture fg_depth, fg_motion;
+@@ -178,6 +190,7 @@ struct TransportSlot {
+     SharedTexture nr_color;
+     SharedTexture nr_depth;
+     SharedTexture nr_motion_vectors;
++    JointNrTextures joint;
+     ID3D12CommandAllocator* allocator{};
+     ID3D12CommandAllocator* nr_allocator{};
+     ID3D11Query* timing_disjoint{};
+@@ -216,6 +229,13 @@ struct TransportSlot {
+ };
+ 
+ struct TransportView {
++    struct JointStabilityHistory {
++        std::array<Microsoft::WRL::ComPtr<ID3D11ShaderResourceView>,2> read;
++        std::array<Microsoft::WRL::ComPtr<ID3D11UnorderedAccessView>,2> write;
++        std::array<unsigned,2> extent{};
++        unsigned front{};
++        uint64_t frame{};
++    };
+     DlssViewId view_id{};
+     std::array<TransportSlot, transport_slot_count> slots{};
+     std::uint32_t next_slot{};
+@@ -224,6 +244,15 @@ struct TransportView {
+     std::uint64_t baseline_session{};
+     bool baseline_warmup_attempted{};
+     bool baseline_active{};
++    std::array<float,4> joint_layout{};
++    std::array<unsigned,2> joint_extent{};
++    uint64_t joint_frame{};
++    JointStabilityHistory joint_stability;
++    struct JointPeripheralViews {
++        ID3D11Texture2D* texture{}; // Owned by the views below.
++        Microsoft::WRL::ComPtr<ID3D11RenderTargetView> write;
++        Microsoft::WRL::ComPtr<ID3D11ShaderResourceView> read;
++    } joint_peripheral;
+     float automatic_nr_scale{-1.0F};
+ };
+ 
+@@ -239,6 +268,19 @@ struct TransportDevice {
+     ID3D11Device1* device11_1{};
+     ID3D11Device5* device11_5{};
+     ID3D12Device* device12{};
++    Microsoft::WRL::ComPtr<ID3D11ComputeShader> joint_pack;
++    Microsoft::WRL::ComPtr<ID3D11DeviceContext> joint_commands;
++    Microsoft::WRL::ComPtr<ID3D11Buffer> joint_constants;
++    Microsoft::WRL::ComPtr<ID3D11SamplerState> joint_sampler;
++    Microsoft::WRL::ComPtr<ID3D11VertexShader> joint_vs;
++    Microsoft::WRL::ComPtr<ID3D11PixelShader> joint_ps;
++    Microsoft::WRL::ComPtr<ID3D11BlendState> joint_blend;
++    Microsoft::WRL::ComPtr<ID3D11ComputeShader> joint_stability_guide, joint_stability_apply;
++    Microsoft::WRL::ComPtr<ID3D11ShaderResourceView> joint_stability_bounds_read;
++    Microsoft::WRL::ComPtr<ID3D11UnorderedAccessView> joint_stability_bounds_write;
++    Microsoft::WRL::ComPtr<ID3D11RasterizerState> joint_raster;
++    Microsoft::WRL::ComPtr<ID3D12RootSignature> joint_signature;
++    Microsoft::WRL::ComPtr<ID3D12PipelineState> joint_resolve;
+     ID3D12CommandQueue* queue12{};
+     ID3D12GraphicsCommandList* command_list12{};
+     ID3D11Fence* fence11{};
+@@ -296,6 +338,7 @@ void release_slot(TransportSlot& slot) noexcept {
+     release_shared_texture(slot.nr_motion_vectors);
+     release_shared_texture(slot.nr_depth);
+     release_shared_texture(slot.nr_color);
++    release_joint_textures(slot.joint);
+     release(slot.nr_allocator);
+     release(slot.allocator);
+     slot = {};
+@@ -1517,8 +1560,36 @@ void mirror_transport_parameters(
+     }
+ }
+ 
++#include "dcs_joint_nr_transport.inc"
++
++struct PendingJointTone {
++    JointNrWork work;
++    DlssViewId view{};
++    unsigned slot{};
++};
++thread_local std::array<PendingJointTone,2> pending_joint_tone;
++
+ }  // namespace
+ 
++extern "C" __declspec(dllexport) void __cdecl DcsJointNr_WritePeripheralV1(
++    unsigned eye,uint64_t frame,ID3D11DeviceContext* context) {
++    auto& pending=pending_joint_tone[eye];
++    if(pending.work.nativeFrame!=frame)return;
++    const auto job=std::exchange(pending,{});
++    Microsoft::WRL::ComPtr<ID3D11Device> contextDevice;
++    context->GetDevice(&contextDevice);
++    std::lock_guard lock(transport_mutex);
++    for(auto& device:transport_devices){
++        if(device.device11!=contextDevice.Get())continue;
++        for(auto& view:device.views){
++            if(view.view_id!=job.view)continue;
++            if(!apply_joint_peripheral(device,view.slots[job.slot],view,context,job.work))
++                trace_event("JOINT NR peripheral write failed eye=%u frame=%llu",eye,static_cast<unsigned long long>(frame));
++            return;
++        }
++    }
++}
++
+ void remember_d3d11_ngx_init(
+     const unsigned long long application_id,
+     const wchar_t* const application_data_path,
+@@ -2144,6 +2215,22 @@ bool evaluate_d3d11_via_d3d12(
+         context->CopySubresourceRegion(slot.nr_color.texture11, 0U, 0U, 0U, 0U, color, 0U, &nr_box);
+     }
+ 
++    JointNrWork joint_work{};
++    const bool joint_requested=nr_before&&settings.quad_view_region==2&&
++        (joint_nr::focusFrames[0]||joint_nr::focusFrames[1]);
++    const bool joint_prepared=joint_requested&&!nr_bypassed&&nr_color.format==DXGI_FORMAT_R16G16B16A16_FLOAT&&
++        prepare_joint_nr(*device,slot,*view,context,contract,{color,depth,motion},
++            {{{color_x,color_y,render_width,render_height},{depth_x,depth_y,render_width,render_height},
++              {mv_x,mv_y,nr_motion_width,nr_motion_height}}},
++            get_int(parameters,"Reset")!=0,joint_work);
++    const bool joint_history=view->joint_layout[2]>view->joint_layout[0];
++    bool joint_evaluated=false;
++    if(!joint_requested){
++        release_joint_textures(slot.joint);
++        view->joint_stability={};
++        view->joint_peripheral={};
++    }
++    if(!joint_prepared)view->joint_layout={};
+     fg_note_reset(device->command_list12);
+     const auto ready_value = device->next_fence_value++;
+     if (FAILED(context4->Signal(device->fence11, ready_value)) ||
+@@ -2217,7 +2304,10 @@ bool evaluate_d3d11_via_d3d12(
+         auto processing_settings = nr_settings;
+         processing_settings.nr_alignment_border_enabled = false;
+         nr_attempt.attempted = true;
+-        nr_before_succeeded = evaluate_dlss_nr(nr_frame, processing_settings);
++        joint_evaluated=joint_prepared&&evaluate_joint_nr(*device,slot,*view,joint_work,nr_frame,processing_settings);
++        if(!joint_evaluated&&(joint_history||joint_prepared))nr_frame.reset=true;
++        if(!joint_evaluated)view->joint_layout={};
++        nr_before_succeeded=joint_evaluated||evaluate_dlss_nr(nr_frame,processing_settings);
+         if (!reuse_sr_inputs_for_nr) {
+             transition(device->command_list12, nr_depth12,
+                 D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE, D3D12_RESOURCE_STATE_COMMON);
+@@ -2710,6 +2800,10 @@ bool evaluate_d3d11_via_d3d12(
+         }
+     }
+     slot.dlss_timing_pending = measure_dlss;
++    if(joint_evaluated){
++        // The transport wait is already queued before DCS resumes this eye's Tone pass.
++        pending_joint_tone[joint_work.eye]={std::move(joint_work),view_id,slot_index};
++    }
+     release(context4);
+     timing.finish();
+     diagnostic_note_d3d11_transport_status(D3D11TransportStatus::active);
+diff --git a/src/hooks.cpp b/src/hooks.cpp
+index 69f7a4a..02fb2de 100644
+--- a/src/hooks.cpp
++++ b/src/hooks.cpp
+@@ -27,6 +27,7 @@
+ #include "runtime.hpp"
+ #include "settings.hpp"
+ #include "quad_view_bridge.hpp"
++#include "dcs_joint_nr_sources.hpp"
+ #include "quad_views_d3d12.hpp"
+ #include "fg_capture.hpp"
+ #include "fg_sr_region.hpp"
+@@ -59,6 +60,8 @@
+ 
+ namespace cheeky::foveated_dlss {
+ 
++#include "dcs_joint_nr_runtime.inc"
++
+ extern "C" {
+ 
+ void register_d3d11_game_feature(
+@@ -4545,6 +4548,8 @@ NgxResult evaluate_with_eye_calibration(ID3D11DeviceContext* context, const NgxH
+     const QuadD3D11DispatchScope quad_dispatch{context,depth.outer};
+     if(quad_dispatch.ticket){static std::atomic<bool> noted{};if(!noted.exchange(true))
+         trace_event("FG NGX D3D11/runtime dispatch gate active (stereo or quad)");}
++    if(depth.outer&&(joint_nr::inputFrames[0]||joint_nr::inputFrames[1])&&!is_d3d11_private_handle(handle))
++        joint_nr::observe(context,handle,parameters);
+     const auto result = invoke();
+     // All temporary NGX parameters and private composites have been restored
+     // before this point. Tag only the outer game evaluation's final output.
+@@ -4558,6 +4563,7 @@ NgxResult evaluate_with_eye_calibration(ID3D11DeviceContext* context, const NgxH
+             source.dlss_view=reinterpret_cast<std::uint64_t>(handle);source.registration_generation=stereo_view_generation(source.dlss_view);
+             source.context=context;source.texture=texture.Get();source.x=get_ui(parameters,"DLSS.Output.Subrect.Base.X");source.y=get_ui(parameters,"DLSS.Output.Subrect.Base.Y");
+             source.width=get_ui(parameters,"OutWidth");source.height=get_ui(parameters,"OutHeight");
++            joint_nr::observe_output(source);
+             if(!quad_view_observe11(source)&&eye_calibration_enabled())eye_calibration_stamp(context, output, source.dlss_view,source.x,source.y,source.width,source.height);
+             fg_publish_d3d11(context,handle,parameters);
+         }
+diff --git a/standalone/overlay_ui.cpp b/standalone/overlay_ui.cpp
+index 9cf7fb1..378b59b 100644
+--- a/standalone/overlay_ui.cpp
++++ b/standalone/overlay_ui.cpp
+@@ -7,6 +7,7 @@
+ #include <shellapi.h>
+ #include <array>
+ #include <algorithm>
++#include "../src/dcs_joint_nr_control.hpp"
+ #include <cfloat>
+ #include <charconv>
+ #include <cmath>
+@@ -445,6 +446,14 @@ void draw_nr(Settings& s, bool quad, std::string_view snapshot) {
+     game_combo("Apply at", source, {{1, "Game, before upscaling", true}, {0, "Game, after upscaling", true},
+         {2, "Headset output (Universal DLSS 5)", false}}, game_dlss, hidden);
+     s.nr_processing_order = nr_processing_order(source);
++    if(quad&&dcs_joint_nr::enabled()&&s.nr_processing_order==NrProcessingOrder::before_upscaling){
++        bool joint=dcs_joint_nr::control();
++        if(ImGui::Checkbox("Extend NR to peripheral views",&joint))dcs_joint_nr::control(joint?1:0);
++        if(joint){
++            bool stable=dcs_joint_nr::focus_stability();
++            if(ImGui::Checkbox("Focus-guided stability",&stable))dcs_joint_nr::focus_stability(stable?1:0);
++        }
++    }
+     }
+     const bool universal = nr_hidden || s.nr_processing_order == NrProcessingOrder::universal;
+     if (!game_dlss && !hidden && !universal)
+diff --git a/src/dcs_joint_nr_control.hpp b/src/dcs_joint_nr_control.hpp
+new file mode 100644
+index 0000000..0f2540e
+--- /dev/null
++++ b/src/dcs_joint_nr_control.hpp
+@@ -0,0 +1,18 @@
++#pragma once
++#include <Windows.h>
++
++namespace dcs_joint_nr {
++inline bool enabled() noexcept {
++    static const bool experiment=GetEnvironmentVariableW(L"DCS_NR_JOINT",nullptr,0)!=0;
++    return experiment;
++}
++inline bool option(const char* symbol,int setting) noexcept {
++    if(!enabled())return false;
++    using Control=int(__cdecl*)(int);
++    const auto module=GetModuleHandleW(L"CheekyFoveatedDLSSRuntime.dll");
++    const auto fn=module?reinterpret_cast<Control>(GetProcAddress(module,symbol)):nullptr;
++    return fn&&fn(setting)!=0;
++}
++inline bool control(int setting=-1) noexcept { return option("DcsJointNr_ControlV1",setting); }
++inline bool focus_stability(int setting=-1) noexcept { return option("DcsJointNr_FocusStabilityV1",setting); }
++}
+diff --git a/src/dcs_joint_nr_sources.hpp b/src/dcs_joint_nr_sources.hpp
+new file mode 100644
+index 0000000..3e7b519
+--- /dev/null
++++ b/src/dcs_joint_nr_sources.hpp
+@@ -0,0 +1,116 @@
++#pragma once
++#include "dcs_joint_nr_control.hpp"
++#include "ngx_abi.hpp"
++#include "quad_view_bridge.hpp"
++#include "settings.hpp"
++#include <array>
++#include <mutex>
++#include <utility>
++#include <wrl/client.h>
++
++namespace cheeky::foveated_dlss::joint_nr {
++using Microsoft::WRL::ComPtr;
++struct Rect { unsigned x{},y{},width{},height{}; };
++struct Peripheral {
++    std::array<ComPtr<ID3D11Texture2D>,2> guides;
++    std::array<Rect,2> guideRects;
++    ComPtr<ID3D11Texture2D> postColor;
++    Rect postRect;
++    float motionX{1},motionY{1};
++    uint64_t nativeFrame{};
++};
++inline std::atomic<bool> active{dcs_joint_nr::enabled()};
++inline std::atomic<bool> focusStability{[] {
++    wchar_t value[2]{};
++    return GetEnvironmentVariableW(L"DCS_NR_FOCUS_STABILITY",value,2)!=1||value[0]!=L'0';
++}()};
++inline thread_local bool frameStability{};
++inline std::mutex sourceMutex;
++inline std::array<Peripheral,2> sources;
++inline thread_local std::array<uint64_t,2> inputFrames{};
++inline thread_local std::array<uint64_t,2> focusFrames{};
++
++inline bool control(int value) {
++    if(!dcs_joint_nr::enabled())return false;
++    if(value>=0)active.store(value!=0,std::memory_order_release);
++    return active.load(std::memory_order_acquire);
++}
++inline void observe(ID3D11DeviceContext* context,const NgxHandle* handle,const NgxParameters* p) {
++    if(!context||!p)return;
++    const auto id=reinterpret_cast<uint64_t>(handle);
++    const auto quad=quad_layer_view_snapshot();
++    const auto* role=quad_view_assignment(quad,id,stereo_view_generation(id));
++    if(!role||role->focus||role->eye_index>=2)return;
++    const auto nativeFrame=inputFrames[role->eye_index];
++    if(!nativeFrame)return;
++    Peripheral next;
++    constexpr const char* keys[]{"Depth","MotionVectors"};
++    for(unsigned i=0;i<next.guides.size();++i){
++        ID3D11Resource* source{};
++        if(!ngx_succeeded(p->Get(keys[i],&source))||!source||
++           FAILED(source->QueryInterface(IID_PPV_ARGS(&next.guides[i]))))return;
++    }
++    const auto read=[&](const char* name){unsigned value=0;p->Get(name,&value);return value;};
++    unsigned renderWidth=read("DLSS.Render.Subrect.Dimensions.Width");
++    unsigned renderHeight=read("DLSS.Render.Subrect.Dimensions.Height");
++    if(!renderWidth)renderWidth=read("Width");
++    if(!renderHeight)renderHeight=read("Height");
++    const unsigned outWidth=read("OutWidth"),outHeight=read("OutHeight");
++    const bool lowMotion=(get_ngx_integer_bits(p,"DLSS.Feature.Create.Flags")&2u)!=0;
++    next.guideRects={{
++        {read("DLSS.Input.Depth.Subrect.Base.X"),read("DLSS.Input.Depth.Subrect.Base.Y"),renderWidth,renderHeight},
++        {read("DLSS.Input.MV.Subrect.Base.X"),read("DLSS.Input.MV.Subrect.Base.Y"),
++         lowMotion?renderWidth:outWidth,lowMotion?renderHeight:outHeight}
++    }};
++    p->Get("MV.Scale.X",&next.motionX);
++    p->Get("MV.Scale.Y",&next.motionY);
++    std::lock_guard lock(sourceMutex);
++    auto& cached=sources[role->eye_index];
++    cached.nativeFrame=0;
++    cached.postColor.Reset();
++    ComPtr<ID3D11Device> device;context->GetDevice(&device);
++    for(unsigned i=0;i<next.guides.size();++i) {
++        D3D11_TEXTURE2D_DESC source{};next.guides[i]->GetDesc(&source);
++        auto& rect=next.guideRects[i];
++        if(!rect.width||!rect.height||uint64_t(rect.x)+rect.width>source.Width||
++           uint64_t(rect.y)+rect.height>source.Height||source.SampleDesc.Count!=1||source.ArraySize!=1)return;
++        const bool full=(source.BindFlags&D3D11_BIND_DEPTH_STENCIL)!=0;
++        D3D11_TEXTURE2D_DESC desc=source,old{};
++        if(!full){desc.Width=rect.width;desc.Height=rect.height;}
++        desc.MipLevels=1;desc.Usage=D3D11_USAGE_DEFAULT;desc.BindFlags=D3D11_BIND_SHADER_RESOURCE;
++        desc.MiscFlags=desc.CPUAccessFlags=0;
++        auto& snapshot=cached.guides[i];
++        if(snapshot)snapshot->GetDesc(&old);
++        if(old.Width!=desc.Width||old.Height!=desc.Height||old.Format!=desc.Format) {
++            snapshot.Reset();
++            if(FAILED(device->CreateTexture2D(&desc,nullptr,&snapshot)))return;
++        }
++        const D3D11_BOX box{rect.x,rect.y,0,rect.x+rect.width,rect.y+rect.height,1};
++        context->CopySubresourceRegion(snapshot.Get(),0,0,0,0,next.guides[i].Get(),0,full?nullptr:&box);
++        if(!full)rect.x=rect.y=0;
++    }
++    cached.guideRects=next.guideRects;cached.motionX=next.motionX;cached.motionY=next.motionY;
++    cached.nativeFrame=nativeFrame;
++}
++inline void observe_output(const CheekyQuadSourceD3D11V1& source) {
++    if(!inputFrames[0]&&!inputFrames[1])return;
++    const auto quad=quad_layer_view_snapshot();
++    const auto* role=quad_view_assignment(quad,source.dlss_view,source.registration_generation);
++    if(!role||role->focus||role->eye_index>=2)return;
++    std::lock_guard lock(sourceMutex);
++    auto& entry=sources[role->eye_index];
++    if(!entry.nativeFrame||entry.nativeFrame!=inputFrames[role->eye_index])return;
++    // The native SR output is consumed before the peripheral post passes run.
++    entry.postColor=static_cast<ID3D11Texture2D*>(source.texture);
++    entry.postRect={source.x,source.y,source.width,source.height};
++}
++inline Peripheral take(unsigned eye,uint64_t nativeFrame) {
++    std::lock_guard lock(sourceMutex);
++    auto& source=sources[eye];
++    if(source.nativeFrame!=nativeFrame)return {};
++    auto result=source;
++    source.postColor.Reset();
++    source.nativeFrame=0;
++    return result;
++}
++}
+diff --git a/src/dcs_joint_nr_runtime.inc b/src/dcs_joint_nr_runtime.inc
+new file mode 100644
+index 0000000..1f87220
+--- /dev/null
++++ b/src/dcs_joint_nr_runtime.inc
+@@ -0,0 +1,36 @@
++extern "C" __declspec(dllexport) BOOL __cdecl DcsJointNr_ControlV1(int setting) {
++    return joint_nr::control(setting)?TRUE:FALSE;
++}
++
++extern "C" __declspec(dllexport) BOOL __cdecl DcsJointNr_RequestedV1() {
++    bool wanted=false;
++    if(joint_nr::active.load(std::memory_order_acquire)){
++        const auto settings=current_settings();
++        wanted=settings.nr_enabled&&settings.nr_processing_order==NrProcessingOrder::before_upscaling&&
++            !settings.quad_nr_selection.bypass;
++    }
++    // DcsQvCull calls once per stereo frame. Retire captures here, after both eyes have finished.
++    static thread_local bool previousWanted=false;
++    if(previousWanted&&!wanted){
++        std::lock_guard lock(joint_nr::sourceMutex);
++        joint_nr::sources={};
++    }
++    previousWanted=wanted;
++    if(!wanted)return FALSE;
++    joint_nr::frameStability=joint_nr::focusStability.load(std::memory_order_relaxed);
++    return TRUE;
++}
++
++extern "C" __declspec(dllexport) void __cdecl DcsJointNr_SetFocusFrameV1(unsigned eye,uint64_t nativeFrame) {
++    joint_nr::focusFrames[eye]=nativeFrame;
++}
++
++extern "C" __declspec(dllexport) void __cdecl DcsJointNr_SetInputFrameV1(unsigned eye,uint64_t nativeFrame) {
++    joint_nr::inputFrames[eye]=nativeFrame;
++}
++
++extern "C" __declspec(dllexport) BOOL __cdecl DcsJointNr_FocusStabilityV1(int setting) {
++    if(setting>=0)joint_nr::focusStability.store(setting!=0,std::memory_order_relaxed);
++    return joint_nr::focusStability.load(std::memory_order_relaxed)?TRUE:FALSE;
++}
++
+diff --git a/src/dcs_joint_nr_transport.inc b/src/dcs_joint_nr_transport.inc
+new file mode 100644
+index 0000000..425571c
+--- /dev/null
++++ b/src/dcs_joint_nr_transport.inc
+@@ -0,0 +1,361 @@
++struct JointNrWork {
++    joint_nr::Warp warp{};
++    bool reset{};
++    unsigned eye{};
++    uint64_t nativeFrame{};
++};
++
++void release_joint_textures(JointNrTextures& textures) noexcept {
++    for(auto* texture:{&textures.input,&textures.working,&textures.depth,&textures.motion}){
++        texture->packUav.Reset();
++        texture->readSrv.Reset();
++        release_shared_texture(*texture);
++    }
++    textures.descriptors.Reset();
++}
++
++bool init_joint_shaders(TransportDevice& device) {
++    if(device.joint_pack&&device.joint_resolve)return true;
++    using Microsoft::WRL::ComPtr;
++    const D3D_SHADER_MACRO resolve[]{{"JOINT_NR_RESOLVE","1"},{nullptr,nullptr}};
++    const D3D_SHADER_MACRO peripheral[]{{"JOINT_NR_RESOLVE","1"},{"JOINT_NR_PERIPH","1"},{nullptr,nullptr}};
++    const auto compile=[&](const char* entry,const char* profile,const D3D_SHADER_MACRO* defines,ID3DBlob** code){
++        ComPtr<ID3DBlob> errors;
++        const auto hr=D3DCompile(joint_nr::shader,sizeof(joint_nr::shader)-1,nullptr,defines,nullptr,entry,
++            profile,D3DCOMPILE_OPTIMIZATION_LEVEL3,0,code,&errors);
++        if(FAILED(hr)&&errors)trace_event("JOINT NR shader %s: %s",entry,static_cast<const char*>(errors->GetBufferPointer()));
++        return SUCCEEDED(hr);
++    };
++    D3D11_BUFFER_DESC constants{};
++    constants.ByteWidth=sizeof(joint_nr::Warp);
++    constants.BindFlags=D3D11_BIND_CONSTANT_BUFFER;
++    D3D11_SAMPLER_DESC sampler{};
++    sampler.Filter=D3D11_FILTER_MIN_MAG_LINEAR_MIP_POINT;
++    sampler.AddressU=sampler.AddressV=sampler.AddressW=D3D11_TEXTURE_ADDRESS_CLAMP;
++    sampler.ComparisonFunc=D3D11_COMPARISON_NEVER;
++    sampler.MaxAnisotropy=1;
++    sampler.MaxLOD=D3D11_FLOAT32_MAX;
++    D3D11_BLEND_DESC blend{};
++    blend.RenderTarget[0]={TRUE,D3D11_BLEND_ONE,D3D11_BLEND_SRC1_COLOR,D3D11_BLEND_OP_ADD,
++        D3D11_BLEND_ZERO,D3D11_BLEND_ONE,D3D11_BLEND_OP_ADD,
++        D3D11_COLOR_WRITE_ENABLE_RED|D3D11_COLOR_WRITE_ENABLE_GREEN|D3D11_COLOR_WRITE_ENABLE_BLUE};
++    D3D11_RASTERIZER_DESC raster{};raster.FillMode=D3D11_FILL_SOLID;raster.CullMode=D3D11_CULL_NONE;raster.DepthClipEnable=TRUE;
++    ComPtr<ID3DBlob> pack,resolveCode,vs,ps;
++    if(!compile("Pack","cs_5_0",nullptr,&pack)||
++       FAILED(device.device11->CreateComputeShader(pack->GetBufferPointer(),pack->GetBufferSize(),nullptr,&device.joint_pack))||
++       FAILED(device.device11->CreateDeferredContext(0,&device.joint_commands))||
++       FAILED(device.device11->CreateBuffer(&constants,nullptr,&device.joint_constants))||
++       FAILED(device.device11->CreateSamplerState(&sampler,&device.joint_sampler))||
++       !compile("Resolve","cs_5_1",resolve,&resolveCode)||
++       !compile("PeriphVS","vs_5_0",peripheral,&vs)||!compile("PeriphNativePS","ps_5_0",peripheral,&ps)||
++       FAILED(device.device11->CreateVertexShader(vs->GetBufferPointer(),vs->GetBufferSize(),nullptr,&device.joint_vs))||
++       FAILED(device.device11->CreatePixelShader(ps->GetBufferPointer(),ps->GetBufferSize(),nullptr,&device.joint_ps))||
++       FAILED(device.device11->CreateBlendState(&blend,&device.joint_blend))||
++       FAILED(device.device11->CreateRasterizerState(&raster,&device.joint_raster)))return false;
++    D3D12_DESCRIPTOR_RANGE ranges[]{
++        {D3D12_DESCRIPTOR_RANGE_TYPE_SRV,2,0,0,0},
++        {D3D12_DESCRIPTOR_RANGE_TYPE_UAV,1,0,0,2}
++    };
++    D3D12_ROOT_PARAMETER params[2]{};
++    params[0].ParameterType=D3D12_ROOT_PARAMETER_TYPE_32BIT_CONSTANTS;
++    params[0].Constants={0,0,sizeof(joint_nr::Warp)/4};
++    params[1].ParameterType=D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
++    params[1].DescriptorTable={2,ranges};
++    D3D12_STATIC_SAMPLER_DESC sample{};
++    sample.Filter=D3D12_FILTER_MIN_MAG_LINEAR_MIP_POINT;
++    sample.AddressU=sample.AddressV=sample.AddressW=D3D12_TEXTURE_ADDRESS_MODE_CLAMP;
++    sample.ComparisonFunc=D3D12_COMPARISON_FUNC_NEVER;
++    sample.MaxAnisotropy=1;
++    sample.MaxLOD=D3D12_FLOAT32_MAX;
++    D3D12_ROOT_SIGNATURE_DESC root{2,params,1,&sample,D3D12_ROOT_SIGNATURE_FLAG_NONE};
++    ComPtr<ID3DBlob> blob;
++    if(FAILED(D3D12SerializeRootSignature(&root,D3D_ROOT_SIGNATURE_VERSION_1,&blob,nullptr))||
++       FAILED(device.device12->CreateRootSignature(0,blob->GetBufferPointer(),blob->GetBufferSize(),
++           IID_PPV_ARGS(&device.joint_signature))))return false;
++    D3D12_COMPUTE_PIPELINE_STATE_DESC pipeline{};
++    pipeline.pRootSignature=device.joint_signature.Get();
++    pipeline.CS={resolveCode->GetBufferPointer(),resolveCode->GetBufferSize()};
++    return SUCCEEDED(device.device12->CreateComputePipelineState(&pipeline,IID_PPV_ARGS(&device.joint_resolve)));
++}
++
++bool pack_joint_nr(TransportDevice& device,JointNrTextures& textures,ID3D11DeviceContext* context,
++    const std::array<ID3D11Resource*,6>& sources,const std::array<joint_nr::Rect,6>& rects,
++    ID3D11ShaderResourceView* peripheral,joint_nr::Warp& warp) {
++    using Microsoft::WRL::ComPtr;
++    std::array<ComPtr<ID3D11ShaderResourceView>,6> reads;
++    std::array<ID3D11ShaderResourceView*,6> srvs{};
++    for(unsigned i=0;i<reads.size();++i){
++        ComPtr<ID3D11Texture2D> source;
++        if(FAILED(sources[i]->QueryInterface(IID_PPV_ARGS(&source))))return false;
++        D3D11_TEXTURE2D_DESC desc{};source->GetDesc(&desc);
++        const auto [x,y,w,h]=rects[i];
++        if(!w||!h||uint64_t(x)+w>desc.Width||uint64_t(y)+h>desc.Height||
++           desc.ArraySize!=1||desc.SampleDesc.Count!=1)return false;
++        if(i==0){
++            srvs[i]=peripheral;
++        }else{
++            D3D11_SHADER_RESOURCE_VIEW_DESC view{};
++            view.Format=(i==2||i==3)?depth_srv_format(desc.Format):desc.Format;
++            view.ViewDimension=D3D11_SRV_DIMENSION_TEXTURE2D;
++            view.Texture2D.MipLevels=1;
++            if(FAILED(device.device11->CreateShaderResourceView(source.Get(),&view,&reads[i])))return false;
++            srvs[i]=reads[i].Get();
++        }
++        warp.sourceRects[i]={float(x),float(y),float(w),float(h)};
++    }
++    const std::array targets{&textures.input,&textures.depth,&textures.motion,&textures.working};
++    std::array<ID3D11UnorderedAccessView*,4> outputs{};
++    for(unsigned i=0;i<outputs.size();++i)outputs[i]=targets[i]->packUav.Get();
++    auto* commands=device.joint_commands.Get();
++    auto* cb=device.joint_constants.Get();
++    auto* sampler=device.joint_sampler.Get();
++    commands->UpdateSubresource(cb,0,nullptr,&warp,0,0);
++    commands->CSSetShader(device.joint_pack.Get(),nullptr,0);
++    commands->CSSetConstantBuffers(0,1,&cb);
++    commands->CSSetSamplers(0,1,&sampler);
++    commands->CSSetShaderResources(0,static_cast<UINT>(srvs.size()),srvs.data());
++    commands->CSSetUnorderedAccessViews(0,static_cast<UINT>(outputs.size()),outputs.data(),nullptr);
++    const auto [width,height]=warp.packedSize;
++    commands->Dispatch((width+7)/8,(height+7)/8,1);
++    ComPtr<ID3D11CommandList> list;
++    if(FAILED(commands->FinishCommandList(FALSE,&list)))return false;
++    context->ExecuteCommandList(list.Get(),TRUE);
++    return true;
++}
++
++bool prepare_joint_nr(TransportDevice& device,TransportSlot& slot,TransportView& view,
++    ID3D11DeviceContext* context,const DlssFrameContract& focus,
++    const std::array<ID3D11Resource*,3>& inputs,const std::array<joint_nr::Rect,3>& rects,
++    bool reset,JointNrWork& work) {
++    const auto quad=quad_layer_view_snapshot();
++    const auto* role=quad_view_assignment(quad,focus.view_id,stereo_view_generation(focus.view_id));
++    if(!role||!role->focus||role->eye_index>=2)return false;
++    const auto frame=quad_app_frame();
++    const auto eye=role->eye_index;
++    const auto miss=[&](unsigned stage,const char* reason){
++        static unsigned logged[2]{};
++        const unsigned bit=1u<<stage;
++        if(!(logged[eye]&bit)){trace_event("JOINT NR skipped eye=%u reason=%s",eye,reason);logged[eye]|=bit;}
++        return false;
++    };
++    const auto nativeFrame=joint_nr::focusFrames[eye];
++    if(!nativeFrame)return miss(7,"same-frame Focus pass unavailable");
++    using Query=bool(__cdecl*)(uint64_t,int64_t,unsigned,float*,float*);
++    const auto layer=quad_view_module();
++    const auto locate=layer?reinterpret_cast<Query>(GetProcAddress(layer,"CheekyQuad_GetFocusSamplingV1")):nullptr;
++    std::array<float,4> inset{},blend{};
++    if(!locate||!locate(frame.session_generation,frame.predicted_display_time,eye,inset.data(),blend.data()))
++        return miss(0,"same-frame Focus projection unavailable");
++    const float w=inset[2],h=inset[3];
++    inset[2]+=inset[0];inset[3]+=inset[1];
++    if(!(w>0&&h>0&&inset[0]>=0&&inset[1]>=0&&inset[2]<=1&&inset[3]<=1&&blend[0]>0&&blend[1]>0))
++        return miss(1,"Focus projection outside periphery");
++    auto outer=joint_nr::take(eye,nativeFrame);
++    const auto& outerRender=outer.guideRects[0];
++    if(!outer.postColor)
++        return miss(2,"same-eye peripheral input unavailable");
++    if(view.joint_peripheral.texture!=outer.postColor.Get()){
++        TransportView::JointPeripheralViews peripheral;
++        peripheral.texture=outer.postColor.Get();
++        if(FAILED(device.device11->CreateRenderTargetView(peripheral.texture,nullptr,&peripheral.write))||
++           FAILED(device.device11->CreateShaderResourceView(peripheral.texture,nullptr,&peripheral.read)))
++            return miss(9,"native peripheral SR views unavailable");
++        view.joint_peripheral=std::move(peripheral);
++    }
++    const auto [width,height]=std::pair{focus.render_width,focus.render_height};
++    const auto [pw,ph]=std::pair{outerRender.width,outerRender.height};
++    auto& j=slot.joint;
++    if(!init_joint_shaders(device))return miss(3,"shader creation failed");
++    const auto ensure=[&](JointTexture& texture,const char* label,DXGI_FORMAT format){
++        if(texture.width!=pw||texture.height!=ph){texture.packUav.Reset();texture.readSrv.Reset();}
++        return create_shared_texture(device,label,pw,ph,format,D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS,texture)&&
++            (texture.packUav||SUCCEEDED(device.device11->CreateUnorderedAccessView(texture.texture11,nullptr,&texture.packUav)));
++    };
++    if(!ensure(j.input,"joint NR input",DXGI_FORMAT_R16G16B16A16_FLOAT)||
++       !ensure(j.working,"joint NR working",DXGI_FORMAT_R16G16B16A16_FLOAT)||
++       !ensure(j.depth,"joint NR depth",DXGI_FORMAT_R32_FLOAT)||
++       !ensure(j.motion,"joint NR motion",DXGI_FORMAT_R16G16_FLOAT))return miss(4,"packed resource creation failed");
++    for(auto* tex:{&j.input,&j.working})if(!tex->readSrv&&FAILED(device.device11->CreateShaderResourceView(tex->texture11,nullptr,&tex->readSrv)))
++        return miss(8,"packed color shader resource view unavailable");
++    if(!j.descriptors){
++        D3D12_DESCRIPTOR_HEAP_DESC heap{D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV,3,D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE,0};
++        if(FAILED(device.device12->CreateDescriptorHeap(&heap,IID_PPV_ARGS(&j.descriptors))))return miss(5,"resolve descriptors failed");
++    }
++    reset=reset||view.joint_layout[2]<=view.joint_layout[0]||
++        view.joint_extent!=std::array{pw,ph}||view.joint_frame+1!=nativeFrame;
++    work={{inset,{outer.motionX/outerRender.width,outer.motionY/outerRender.height,
++                  focus.motion_vector_scale_x/width,focus.motion_vector_scale_y/height},
++           {pw,ph},{width,height},0,0,{},blend,reset?inset:view.joint_layout,{}},reset,eye,nativeFrame};
++    const std::array sources{static_cast<ID3D11Resource*>(outer.postColor.Get()),inputs[0],
++        static_cast<ID3D11Resource*>(outer.guides[0].Get()),inputs[1],
++        static_cast<ID3D11Resource*>(outer.guides[1].Get()),inputs[2]};
++    const std::array allRects{outer.postRect,rects[0],outer.guideRects[0],rects[1],outer.guideRects[1],rects[2]};
++    return pack_joint_nr(device,j,context,sources,allRects,view.joint_peripheral.read.Get(),work.warp)||
++        miss(6,"D3D11 source or pack rejected");
++}
++
++void resolve_joint_nr(TransportDevice& device,JointNrTextures& textures,const joint_nr::Warp& warp,ID3D12Resource* output) {
++    const auto increment=device.device12->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
++    auto cpu=textures.descriptors->GetCPUDescriptorHandleForHeapStart();
++    for(auto* read:{textures.input.resource12,textures.working.resource12}){
++        device.device12->CreateShaderResourceView(read,nullptr,cpu);cpu.ptr+=increment;
++    }
++    device.device12->CreateUnorderedAccessView(output,nullptr,nullptr,cpu);
++    auto* list=device.command_list12;
++    auto* heap=textures.descriptors.Get();
++    list->SetDescriptorHeaps(1,&heap);
++    list->SetComputeRootSignature(device.joint_signature.Get());
++    list->SetComputeRoot32BitConstants(0,sizeof(warp)/4,&warp,0);
++    list->SetComputeRootDescriptorTable(1,heap->GetGPUDescriptorHandleForHeapStart());
++    list->SetPipelineState(device.joint_resolve.Get());
++    list->Dispatch((warp.focusSize[0]+7)/8,(warp.focusSize[1]+7)/8,1);
++    D3D12_RESOURCE_BARRIER barrier{};barrier.Type=D3D12_RESOURCE_BARRIER_TYPE_UAV;barrier.UAV.pResource=output;
++    list->ResourceBarrier(1,&barrier);
++}
++
++bool evaluate_joint_nr(TransportDevice& device,TransportSlot& slot,TransportView& view,const JointNrWork& work,
++    const DlssNrFrame& focus,const Settings& settings) {
++    auto* list=device.command_list12;
++    auto& j=slot.joint;
++    for(auto* t:{&j.input,&j.depth,&j.motion})
++        transition(list,t->resource12,D3D12_RESOURCE_STATE_COMMON,D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
++    transition(list,j.working.resource12,D3D12_RESOURCE_STATE_COMMON,D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
++    const auto [pw,ph]=work.warp.packedSize;
++    DlssNrFrame packed{};
++    packed.view_id=focus.view_id;packed.route=focus.route;packed.command_list=list;
++    packed.color=j.working.resource12;packed.depth=j.depth.resource12;packed.motion_vectors=j.motion.resource12;
++    packed.input_width=packed.output_width=packed.depth_width=packed.motion_width=packed.processing_width=pw;
++    packed.input_height=packed.output_height=packed.depth_height=packed.motion_height=packed.processing_height=ph;
++    packed.depth_inverted=focus.depth_inverted;packed.create_flags=focus.create_flags|dlss_feature_flag_mv_low_res;
++    packed.reset=work.reset;packed.motion_vectors_jittered=focus.motion_vectors_jittered;
++    packed.jitter_uv_x=focus.jitter_uv_x*(work.warp.focus[2]-work.warp.focus[0]);
++    packed.jitter_uv_y=focus.jitter_uv_y*(work.warp.focus[3]-work.warp.focus[1]);
++    packed.result_weight=focus.result_weight;
++    packed.active_working_scale=focus.active_working_scale;
++    const bool evaluated=evaluate_dlss_nr(packed,settings);
++    if(evaluated){
++        transition(list,j.working.resource12,D3D12_RESOURCE_STATE_UNORDERED_ACCESS,D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
++        resolve_joint_nr(device,j,work.warp,focus.color);
++        view.joint_layout=work.warp.focus;
++        view.joint_extent={pw,ph};
++        view.joint_frame=work.nativeFrame;
++    }
++    transition(list,j.working.resource12,evaluated?D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE:
++        D3D12_RESOURCE_STATE_UNORDERED_ACCESS,D3D12_RESOURCE_STATE_COMMON);
++    for(auto* t:{&j.input,&j.depth,&j.motion})
++        transition(list,t->resource12,D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE,D3D12_RESOURCE_STATE_COMMON);
++    return evaluated;
++}
++
++bool prepare_joint_stability(TransportDevice& device,TransportView::JointStabilityHistory& history,
++                             const std::array<unsigned,2>& extent) {
++    using Microsoft::WRL::ComPtr;
++    if(!device.joint_stability_bounds_write){
++        const D3D_SHADER_MACRO defines[]{{"JOINT_NR_LIMIT","1"},{nullptr,nullptr}};
++        const auto compile=[&](const char* entry,ID3D11ComputeShader** shader){
++            ComPtr<ID3DBlob> code,errors;
++            const auto result=D3DCompile(joint_nr::shader,sizeof(joint_nr::shader)-1,nullptr,defines,nullptr,entry,
++                "cs_5_0",D3DCOMPILE_OPTIMIZATION_LEVEL3,0,&code,&errors);
++            if(FAILED(result)&&errors)trace_event("JOINT NR shader %s: %s",entry,static_cast<const char*>(errors->GetBufferPointer()));
++            return SUCCEEDED(result)&&SUCCEEDED(device.device11->CreateComputeShader(
++                code->GetBufferPointer(),code->GetBufferSize(),nullptr,shader));
++        };
++        D3D11_BUFFER_DESC desc{};
++        desc.ByteWidth=desc.StructureByteStride=sizeof(float)*4;
++        desc.MiscFlags=D3D11_RESOURCE_MISC_BUFFER_STRUCTURED;
++        desc.BindFlags=D3D11_BIND_SHADER_RESOURCE|D3D11_BIND_UNORDERED_ACCESS;
++        ComPtr<ID3D11Buffer> buffer;
++        if(!compile("GuideLimit",&device.joint_stability_guide)||
++           !compile("ApplyLimit",&device.joint_stability_apply)||
++           FAILED(device.device11->CreateBuffer(&desc,nullptr,&buffer))||
++           FAILED(device.device11->CreateShaderResourceView(buffer.Get(),nullptr,&device.joint_stability_bounds_read))||
++           FAILED(device.device11->CreateUnorderedAccessView(buffer.Get(),nullptr,&device.joint_stability_bounds_write)))
++            return false;
++    }
++    if(history.extent==extent)return true;
++    TransportView::JointStabilityHistory next;
++    D3D11_TEXTURE2D_DESC desc{};
++    desc.Width=extent[0];desc.Height=extent[1];desc.MipLevels=desc.ArraySize=desc.SampleDesc.Count=1;
++    desc.Format=DXGI_FORMAT_R16G16B16A16_FLOAT;
++    desc.BindFlags=D3D11_BIND_SHADER_RESOURCE|D3D11_BIND_UNORDERED_ACCESS;
++    for(unsigned i=0;i<next.read.size();++i){
++        ComPtr<ID3D11Texture2D> image;
++        if(FAILED(device.device11->CreateTexture2D(&desc,nullptr,&image))||
++           FAILED(device.device11->CreateShaderResourceView(image.Get(),nullptr,&next.read[i]))||
++           FAILED(device.device11->CreateUnorderedAccessView(image.Get(),nullptr,&next.write[i])))return false;
++    }
++    next.extent=extent;
++    history=std::move(next);
++    return true;
++}
++
++bool apply_joint_peripheral(TransportDevice& device,TransportSlot& slot,TransportView& view,
++                            ID3D11DeviceContext* context,const JointNrWork& work) {
++    using Microsoft::WRL::ComPtr;
++    // Queue the additive HDR write after the existing D3D12 completion wait.
++    const auto commands=device.joint_commands.Get();
++    auto* constants=device.joint_constants.Get();
++    auto* sampler=device.joint_sampler.Get();
++    auto* target=view.joint_peripheral.write.Get();
++    auto warp=work.warp;
++    auto& history=view.joint_stability;
++    const bool stability=joint_nr::frameStability;
++    auto& motion=slot.joint.motion;
++    if(stability&&prepare_joint_stability(device,history,warp.packedSize)&&
++       (motion.readSrv||SUCCEEDED(device.device11->CreateShaderResourceView(motion.texture11,nullptr,&motion.readSrv)))){
++        warp.limitEnabled=1;
++        warp.limitSeed=work.reset||history.frame+1!=work.nativeFrame;
++    }else if(stability){
++        static bool logged=false;
++        if(!logged){trace_event("JOINT NR stability resources unavailable");logged=true;}
++    }else if(history.extent[0]){
++        history={};
++    }
++    const auto back=1-history.front;
++    ID3D11ShaderResourceView* reads[]{slot.joint.input.readSrv.Get(),slot.joint.working.readSrv.Get(),
++        warp.limitEnabled?history.read[back].Get():nullptr};
++    const auto& rect=warp.sourceRects[0];
++    const D3D11_VIEWPORT viewport{rect[0],rect[1],rect[2],rect[3],0,1};
++    commands->ClearState();
++    commands->UpdateSubresource(constants,0,nullptr,&warp,0,0);
++    if(warp.limitEnabled){
++        ID3D11ShaderResourceView* inputs[]{reads[0],reads[1],history.read[history.front].Get(),
++            motion.readSrv.Get(),view.joint_peripheral.read.Get(),nullptr};
++        commands->CSSetConstantBuffers(0,1,&constants);
++        commands->CSSetSamplers(0,1,&sampler);
++        commands->CSSetShaderResources(0,6,inputs);
++        if(!warp.limitSeed){
++            auto* bounds=device.joint_stability_bounds_write.Get();
++            commands->CSSetUnorderedAccessViews(1,1,&bounds,nullptr);
++            commands->CSSetShader(device.joint_stability_guide.Get(),nullptr,0);
++            commands->Dispatch(1,1,1);
++        }
++        ID3D11UnorderedAccessView* output[]{history.write[back].Get(),nullptr};
++        auto* bounds=device.joint_stability_bounds_read.Get();
++        commands->CSSetUnorderedAccessViews(0,2,output,nullptr);
++        commands->CSSetShaderResources(5,1,&bounds);
++        commands->CSSetShader(device.joint_stability_apply.Get(),nullptr,0);
++        commands->Dispatch((warp.packedSize[0]+7)/8,(warp.packedSize[1]+7)/8,1);
++        // End the source SRV read before writing the same HDR subresource through its RTV.
++        commands->ClearState();
++    }
++    commands->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
++    commands->RSSetState(device.joint_raster.Get());
++    commands->RSSetViewports(1,&viewport);
++    commands->OMSetRenderTargets(1,&target,nullptr);
++    commands->OMSetBlendState(device.joint_blend.Get(),nullptr,~0u);
++    commands->VSSetShader(device.joint_vs.Get(),nullptr,0);
++    commands->PSSetShader(device.joint_ps.Get(),nullptr,0);
++    commands->PSSetConstantBuffers(0,1,&constants);
++    commands->PSSetSamplers(0,1,&sampler);
++    commands->PSSetShaderResources(0,3,reads);
++    commands->Draw(3,0);
++    ComPtr<ID3D11CommandList> list;
++    if(FAILED(commands->FinishCommandList(FALSE,&list)))return false;
++    context->ExecuteCommandList(list.Get(),TRUE);
++    if(warp.limitEnabled){
++        history.front=back;
++        history.frame=work.nativeFrame;
++    }
++    return true;
++}
+diff --git a/src/dcs_joint_nr_warp.hpp b/src/dcs_joint_nr_warp.hpp
+new file mode 100644
+index 0000000..75ec6b8
+--- /dev/null
++++ b/src/dcs_joint_nr_warp.hpp
+@@ -0,0 +1,186 @@
++#pragma once
++#include "quad_blend_shader.hpp"
++#include <array>
++namespace cheeky::foveated_dlss::joint_nr {
++struct Warp {
++    std::array<float,4> focus;
++    std::array<float,4> motionScale;
++    std::array<unsigned,2> packedSize,focusSize;
++    unsigned limitEnabled{},limitSeed{};
++    std::array<unsigned,2> padding{};
++    std::array<float,4> blend,previousFocus;
++    std::array<std::array<float,4>,6> sourceRects;
++};
++static_assert(sizeof(Warp)==48*sizeof(float));
++
++inline constexpr char shader[]=CHEEKY_QUAD_BLEND_HLSL R"HLSL(
++cbuffer Params:register(b0){
++    float4 Focus;
++    float4 MotionScale;
++    uint2 PackedSize,FocusSize;
++    uint LimitEnabled,LimitSeed;
++    uint2 Padding;
++    float4 Blend,PreviousFocus;
++    float4 SourceRects[6];
++};
++SamplerState LinearClamp:register(s0);
++Texture2D<float4> Outer:register(t0);
++Texture2D<float4> Inner:register(t1);
++#ifdef JOINT_NR_LIMIT
++Texture2D<float4> History:register(t2);
++Texture2D<float2> Motion:register(t3);
++Texture2D<float4> Tone:register(t4);
++StructuredBuffer<float4> LimitBounds:register(t5);
++RWTexture2D<float4> NextHistory:register(u0);
++RWStructuredBuffer<float4> MeasuredBounds:register(u1);
++float brightness(float3 rgb){return max(0.0,dot(rgb,float3(.2126,.7152,.0722)))+.015;}
++float correctionStops(float3 source,float3 output){return log2(brightness(output)/brightness(source));}
++groupshared uint BoundsHistogram[256];
++groupshared uint GuideSamples;
++float decodeBin(uint bin){
++    const float v=(float(bin)+.5)/128-1;
++    return .25*v/(1-abs(v));
++}
++[numthreads(256,1,1)]
++void GuideLimit(uint i:SV_GroupIndex){
++    BoundsHistogram[i]=0;
++    if(i==0)GuideSamples=0;
++    GroupMemoryBarrierWithGroupSync();
++    const uint2 samples=(max(FocusSize,33)-33)/12+1;
++    for(uint j=i;j<samples.x*samples.y;j+=256){
++        const float2 local=(16.5+12*float2(j%samples.x,j/samples.x))/FocusSize;
++        const float2 uv=lerp(Focus.xy,Focus.zw,local);
++        const float2 prior=uv+Motion.SampleLevel(LinearClamp,uv,0);
++        const float2 oldLocal=(prior-PreviousFocus.xy)/(PreviousFocus.zw-PreviousFocus.xy);
++        if(any(oldLocal<.03)||any(oldLocal>.97))continue;
++        const float raw=correctionStops(Outer.SampleLevel(LinearClamp,uv,0).rgb,Inner.SampleLevel(LinearClamp,uv,0).rgb);
++        const float delta=raw-History.SampleLevel(LinearClamp,prior,0).x;
++        // Compact the histogram tails while retaining precision around zero.
++        const uint bin=min(255u,(uint)((1+delta/(.25+abs(delta)))*128));
++        InterlockedAdd(BoundsHistogram[bin],1);
++        InterlockedAdd(GuideSamples,1);
++    }
++    GroupMemoryBarrierWithGroupSync();
++    if(i==0){
++        uint sum=0,lo=0,mid=0,hi=0;
++        if(GuideSamples){
++            const uint last=GuideSamples-1;
++            const uint lowRank=last/4,midRank=last/2,highRank=last*3/4;
++            for(uint bin=0;bin<256;++bin){
++                sum+=BoundsHistogram[bin];
++                if(sum<=lowRank)lo=bin+1;
++                if(sum<=midRank)mid=bin+1;
++                if(sum<=highRank)hi=bin+1;
++            }
++            MeasuredBounds[0]=float4(min(0.0,decodeBin(lo)),max(0.0,decodeBin(hi)),decodeBin(mid),0);
++        }else MeasuredBounds[0]=0;
++    }
++}
++[numthreads(8,8,1)]
++void ApplyLimit(uint3 i:SV_DispatchThreadID){
++    if(any(i.xy>=PackedSize))return;
++    const float3 a=Outer.Load(int3(i.xy,0)).rgb,b=Inner.Load(int3(i.xy,0)).rgb;
++    const float2 uv=(float2(i.xy)+.5)/PackedSize;
++    uint2 toneSize;
++    Tone.GetDimensions(toneSize.x,toneSize.y);
++    const float4 rect=SourceRects[0];
++    const float3 base=Tone.SampleLevel(LinearClamp,(rect.xy+uv*rect.zw)/toneSize,0).rgb;
++    const float raw=correctionStops(base,base+b-a);
++    float applied=raw;
++    if(!LimitSeed){
++        const float2 previousUv=uv+Motion.Load(int3(i.xy,0));
++        if(all(previousUv>=0.0)&&all(previousUv<1.0)){
++            const float previous=History.SampleLevel(LinearClamp,previousUv,0).y;
++            const float3 guide=LimitBounds[0].xyz;
++            const float change=clamp(raw-previous,guide.x,guide.y);
++            // Keep the Focus trend and let the remaining history error decay.
++            const float focusTrend=clamp(change,min(0.0,guide.z),max(0.0,guide.z));
++            applied=previous+focusTrend+.3*(raw-previous-focusTrend);
++        }
++    }
++    NextHistory[i.xy]=float4(correctionStops(a,b),applied,applied-raw,0);
++}
++#else
++#ifndef JOINT_NR_RESOLVE
++Texture2D<float> OuterDepth:register(t2);
++Texture2D<float> InnerDepth:register(t3);
++Texture2D<float2> OuterMotion:register(t4);
++Texture2D<float2> InnerMotion:register(t5);
++#endif
++RWTexture2D<float4> Output0:register(u0);
++RWTexture2D<float> PackedDepth:register(u1);
++RWTexture2D<float2> PackedMotion:register(u2);
++RWTexture2D<float4> Output1:register(u3);
++
++float2 focusUV(float2 uv){return (uv-Focus.xy)/(Focus.zw-Focus.xy);}
++uint2 pixel(float2 uv,uint index){
++    const float4 r=SourceRects[index];
++    return uint2(r.xy+clamp(uv*r.zw,0.0,r.zw-1));
++}
++float2 colorUV(float2 uv,uint index,float2 size){
++    const float4 r=SourceRects[index];
++    return (r.xy+clamp(uv*r.zw,.5,r.zw-.5))/size;
++}
++#ifndef JOINT_NR_RESOLVE
++float4 focusColor(float2 local,float2 size){
++    // Each tap represents a quarter of one peripheral-grid pixel in Focus UV.
++    const float2 step=.25/(float2(PackedSize)*(Focus.zw-Focus.xy));
++    return .25*(Inner.SampleLevel(LinearClamp,colorUV(local+step,1,size),0)+
++                Inner.SampleLevel(LinearClamp,colorUV(local-step,1,size),0)+
++                Inner.SampleLevel(LinearClamp,colorUV(local+float2(step.x,-step.y),1,size),0)+
++                Inner.SampleLevel(LinearClamp,colorUV(local+float2(-step.x,step.y),1,size),0));
++}
++[numthreads(8,8,1)]
++void Pack(uint3 id:SV_DispatchThreadID){
++    if(any(id.xy>=PackedSize))return;
++    const float2 uv=(float2(id.xy)+.5)/PackedSize;
++    const float2 local=focusUV(uv);
++    const float w=quadFocusWeight(local,Focus.zw-Focus.xy,Blend);
++    uint2 ow,iw;
++    Outer.GetDimensions(ow.x,ow.y);Inner.GetDimensions(iw.x,iw.y);
++    const bool focus=w>=.5;
++    const float4 color=focus?focusColor(local,iw):
++                              Outer.SampleLevel(LinearClamp,colorUV(uv,0,ow),0);
++    Output0[id.xy]=color;
++    Output1[id.xy]=color;
++    PackedDepth[id.xy]=focus?InnerDepth.Load(int3(pixel(local,3),0)):OuterDepth.Load(int3(pixel(uv,2),0));
++    // Game motion references the previous frame of its source view.
++    const float2 previous=focus?
++        lerp(PreviousFocus.xy,PreviousFocus.zw,local+InnerMotion.Load(int3(pixel(local,5),0))*MotionScale.zw):
++        uv+OuterMotion.Load(int3(pixel(uv,4),0))*MotionScale.xy;
++    PackedMotion[id.xy]=previous-uv;
++}
++#else
++float3 delta(float2 uv){
++    return Inner.SampleLevel(LinearClamp,uv,0).rgb-Outer.SampleLevel(LinearClamp,uv,0).rgb;
++}
++#ifdef JOINT_NR_PERIPH
++struct V {float4 position:SV_Position;float2 uv:TEXCOORD0;};
++V PeriphVS(uint id:SV_VertexID){
++    V v;v.uv=float2((id<<1)&2,id&2);
++    v.position=float4(v.uv*float2(2,-2)+float2(-1,1),0,1);return v;
++}
++Texture2D<float4> LimitHistory:register(t2);
++struct PeripheralBlend {float4 correction:SV_Target0;float4 gain:SV_Target1;};
++PeripheralBlend PeriphNativePS(V v){
++    const float gain=LimitEnabled?exp2(LimitHistory.SampleLevel(LinearClamp,v.uv,0).z):1;
++    // The blend unit applies gain to the existing HDR without sampling the RTV.
++    PeripheralBlend output;
++    output.correction=float4(delta(v.uv)*gain+.015*(gain-1),0);
++    output.gain=float4(gain,gain,gain,1);
++    return output;
++}
++#else
++[numthreads(8,8,1)]
++void Resolve(uint3 id:SV_DispatchThreadID){
++    if(all(id.xy<FocusSize)){
++        const float2 uv=lerp(Focus.xy,Focus.zw,(float2(id.xy)+.5)/FocusSize);
++        const float4 source=Output0[id.xy];
++        Output0[id.xy]=float4(source.rgb+delta(uv),source.a);
++    }
++}
++#endif
++#endif
++#endif
++)HLSL";
++}

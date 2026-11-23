@@ -395,6 +395,8 @@ void UseTempOutputDir() {
   atexit(&CleanTestOutDir);
 }
 
+#include "gui_view_probe_test.h"
+
 #ifdef QV_TEST_NO_MAIN
 int TestMain() {
 #else
@@ -403,6 +405,7 @@ int main() {
   if (getenv("QV_UNBUFFERED")) setvbuf(stdout, nullptr, _IONBF, 0);  // R97: the order of lines around a crash
   g_log = stdout;
   g_mute = true;
+  if (getenv("QV_GUI_VIEW_ONLY")) return GuiViewProbeTest();
   UseTempOutputDir();
   r90::NoteRingAtLoad();  // R115 (L2): the async log ring before any test (checked in r90::AsyncLog)
   StartTestLoad();
