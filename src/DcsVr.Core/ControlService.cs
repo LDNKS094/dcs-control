@@ -95,9 +95,7 @@ public sealed class ControlService(string distributionRoot, string stateRoot)
 
     /// <summary>True when DLSS 5 is on and the profile names no runtime file that exists, so the saved copy is used.</summary>
     public static bool UsesSavedRuntime(VrProfile profile) =>
-        (profile.NeuralRendering || profile.UsesOptiScaler) && (string.IsNullOrWhiteSpace(profile.NeuralRuntimePath) || !File.Exists(profile.NeuralRuntimePath));
-
-    public string BundledNeuralRuntime => Path.Combine(DistributionRoot, OptiScalerBackend.ComponentFolder, "OptiScaler", NeuralRuntimeStore.FileName);
+        profile.UsesNeuralRuntime && (string.IsNullOrWhiteSpace(profile.NeuralRuntimePath) || !File.Exists(profile.NeuralRuntimePath));
 
     /// <summary>The profile with the saved runtime copy filled in when it has no runtime path of its own (or one that no
     /// longer exists). Profiles keep a null path, meaning "use the saved copy"; only checks and deployment see it filled.</summary>
@@ -106,10 +104,9 @@ public sealed class ControlService(string distributionRoot, string stateRoot)
     public VrProfile ResolveNeuralRuntime(VrProfile profile, out string? savedSha256)
     {
         savedSha256 = null;
-        if (!(profile.NeuralRendering || profile.UsesOptiScaler)) return profile;
+        if (!profile.UsesNeuralRuntime) return profile;
         var store = SavedRuntime;
         if (UsesSavedRuntime(profile) && store.Current() is { } saved) profile = profile with { NeuralRuntimePath = saved.Path };
-        if (UsesSavedRuntime(profile) && File.Exists(BundledNeuralRuntime)) profile = profile with { NeuralRuntimePath = BundledNeuralRuntime };
         if (!string.IsNullOrWhiteSpace(profile.NeuralRuntimePath) && Path.GetFullPath(profile.NeuralRuntimePath).Equals(store.DllPath, StringComparison.OrdinalIgnoreCase))
             savedSha256 = store.Read()?.Sha256;
         return profile;

@@ -105,6 +105,7 @@ public sealed record VrProfile
     /// <summary>OptiScaler NR, SR and frame generation on the monitor; VR settings stay separate.</summary>
     public bool DesktopEnhanced { get; init; }
     public bool UsesOptiScaler => Desktop && DesktopEnhanced;
+    public bool UsesNeuralRuntime => Desktop ? UsesOptiScaler && OptiScaler.NeuralRendering : NeuralRendering;
     public bool UsesBackendRenderingLifecycle => UsesOptiScaler || (!Desktop && Runtime == RuntimeKind.Vdxr && UsesCheeky);
     public bool UsesRenderingLifecycle => UsesBackendRenderingLifecycle || UsesReleaseIdleDlss;
     public bool UsesVdxrQuadViews => !Desktop && Runtime == RuntimeKind.Vdxr && QuadViews == QuadProvider.CheekyNative;

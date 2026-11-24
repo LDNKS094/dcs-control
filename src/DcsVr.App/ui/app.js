@@ -166,7 +166,7 @@ function askDxgiFirst(action) {
   const dxgi = state?.foreignDxgi; if (!dxgi || dxgiAcknowledged(dxgi)) return false;
   pendingDxgiAction = action;
   const name = dxgi.product || 'another program';
-  const renderer = profile.desktop && profile.desktopEnhanced ? 'Desktop Enhanced' : 'DLSS 5';
+  const renderer = profile.desktop && profile.desktopEnhanced ? 'Desktop' : 'DLSS 5';
   $('dxgiText').textContent = `DCS's bin folder has a dxgi.dll from ${name}, and ${renderer} needs that file name. Keep it working: DCS Control backs it up and loads it together with ${renderer}, so ${name} still works in DCS. Set it aside: it is backed up and stays off in DCS while this profile is applied.`;
   $('dxgiDialog').showModal(); return true;
 }
@@ -267,7 +267,7 @@ function deriveIdentity(p) {
     if (s.frameGeneration) parts.push(['fg','DLSS frame generation']);
     if (p.cpuBoost) parts.push(['boost','CPU Boost']);
     if (p.engineOptimizations) parts.push(['opt','Engine Optimizations']);
-    return {id:'desktop-enhanced-'+(parts.length ? parts.map(x => x[0]).join('-') : 'original'),name:'Desktop Enhanced · '+(parts.length ? parts.map(x => x[1]).join(' + ') : 'Native-resolution AA')};
+    return {id:'desktop-enhanced-'+(parts.length ? parts.map(x => x[0]).join('-') : 'original'),name:'Desktop · '+(parts.length ? parts.map(x => x[1]).join(' + ') : 'Native-resolution AA')};
   }
   if (p.desktop) return {id:'desktop-optimizations',name:'Optimizations only'};
   const route = p.runtime === 'SboysSteamVr' ? 'Sboys' : p.runtime === 'Vdxr' ? 'VDXR' : 'Pimax', parts = [];
@@ -1209,7 +1209,7 @@ function buildFields() {
   because(at('neuralFocusArea'),p => !nr(p) ? dlssWhy : p.quadViews !== 'QuadViewsFoveated' ? bundledWhy : null);
   because(at('quadNeuralEdgeFade'),p => !nr(p) ? dlssWhy : p.quadViews !== 'QuadViewsFoveated' ? bundledWhy : p.neuralFocusArea < 100 ? 'Set DLSS 5 area to Whole focus area to use this.' : effectiveFovea(p).blend > 0 ? null : 'Needs Focus edge blending above 0 (Quad Views page).');
   because(f => f.condition === nr,dlssWhy);
-  because(at('keepOtherDxgi'),'Choose Desktop Enhanced, or turn on DLSS 5 or Foveated Super Resolution in VR, to change this.');
+  because(at('keepOtherDxgi'),'Choose Desktop, or turn on DLSS 5 or Foveated Super Resolution in VR, to change this.');
   // Focus area without Quad Views: sized by DLSS 5 or Foveated Super Resolution; the periphery by Foveated Super Resolution only.
   const stereoWhy = 'Turn on DLSS 5 or Foveated Super Resolution to change these.';
   because(at('peripheralScale'),p => stereoCheeky(p) ? 'Turn on Foveated Super Resolution to change this.' : stereoWhy);
@@ -1338,15 +1338,15 @@ async function forgetRuntime() {
   catch (error) { showError(error); } finally { setBusy(false); updateControls(); }
 }
 function renderSavedRuntime() {
-  const box = $('savedRuntime'), s = state?.savedRuntime, bundled = state?.bundledNeuralRuntime, retained = state?.retainedRuntime, own = profile.neuralRuntimePath;
-  const details = $('nrRuntimeDetails'), configured = Boolean(own || s || bundled);
+  const box = $('savedRuntime'), s = state?.savedRuntime, retained = state?.retainedRuntime, own = profile.neuralRuntimePath;
+  const details = $('nrRuntimeDetails'), configured = Boolean(own || s);
   if (details.dataset.configured !== String(configured)) { details.open = !configured; details.dataset.configured = String(configured); }
-  $('input-neuralRuntimePath').placeholder = s ? 'Saved copy · version '+(s.version || 'unknown') : bundled ? 'Included runtime · version '+(bundled.version || 'unknown') : 'nvngx_dlssnr.dll';
+  $('input-neuralRuntimePath').placeholder = s ? 'Saved copy · version '+(s.version || 'unknown') : 'nvngx_dlssnr.dll';
   // With a saved copy, Change… replaces Browse.
-  $('browse-neuralRuntimePath').hidden = Boolean(s || bundled);
-  box.hidden = !s && !bundled && !retained; if (box.hidden) { box.innerHTML = ''; return; }
+  $('browse-neuralRuntimePath').hidden = Boolean(s);
+  box.hidden = !s && !retained; if (box.hidden) { box.innerHTML = ''; return; }
   const kept = retained ? `<p class="fine">The forgotten copy stays at ${escape(retained)} because the applied profile uses it. It is deleted once that profile is no longer applied.</p>` : '';
-  if (!s) { box.innerHTML = (bundled ? `<div class="saved-runtime-head"><div><b>Included runtime · version ${escape(bundled.version || 'unknown')}</b><small>${escape(bundled.path)}</small></div><div class="saved-runtime-actions"><button type="button" class="button secondary" id="changeRuntime"${busy ? ' disabled' : ''}>Change…</button></div></div>` : '') + (own ? '<p class="fine">This profile uses the file entered above.</p>' : '') + kept; return; }
+  if (!s) { box.innerHTML = (own ? '<p class="fine">This profile uses the file entered above.</p>' : '') + kept; return; }
   box.innerHTML = `<div class="saved-runtime-head"><div><b>Saved copy · version ${escape(s.version || 'unknown')} · from ${escape(s.originalPath)}</b><small>Kept at ${escape(s.path)} · ${s.modified ? 'NVIDIA\'s file changed by a compatibility patch, not signed by NVIDIA' : 'NVIDIA signature verified'} · saved ${new Date(s.savedAt).toLocaleString('en-GB')}${s.originalExists ? '' : ' · the original file is gone, the copy is still used'}</small></div><div class="saved-runtime-actions"><button type="button" class="button secondary" id="changeRuntime"${busy ? ' disabled' : ''}>Change…</button><button type="button" class="button quiet" id="forgetRuntime"${busy ? ' disabled' : ''}>Forget</button></div></div>`
     + (own ? '<p class="fine">This profile uses the file entered above. Clear the field to use the saved copy.</p>' : '') + kept;
 }
@@ -2109,7 +2109,7 @@ document.addEventListener('click', e => {
  *  features stay in the profile for the next VR flight but do not run, so they are not named. */
 function runsWith(p) {
   if (!p) return 'DCS as it is';
-  const on = featureState(p), vr = !p.desktop, route = p.desktop ? p.desktopEnhanced ? 'Desktop Enhanced' : 'Optimizations only' : p.runtime === 'SboysSteamVr' ? 'Sboys' : p.runtime === 'Vdxr' ? 'VDXR' : 'Pimax';
+  const on = featureState(p), vr = !p.desktop, route = p.desktop ? p.desktopEnhanced ? 'Desktop' : 'Optimizations only' : p.runtime === 'SboysSteamVr' ? 'Sboys' : p.runtime === 'Vdxr' ? 'VDXR' : 'Pimax';
   const running = [desktopEnhanced(p) && on.dlss && 'Neural rendering', desktopEnhanced(p) && on.sr && 'Super resolution', desktopEnhanced(p) && on.framegen && 'DLSS frame generation', vr && on.quad && (p.quadViews === 'PimaxNative' ? 'Pimax Quad Views' : 'Quad Views'), vr && (p.neuralRendering ? 'DLSS 5' : foveatedSr(p) && 'Foveated Super Resolution'), vr && on.framegen && 'Frame generation', on.boost && 'CPU Boost', on.engine && 'Engine Optimizations'].filter(Boolean);
   return route+' · '+(running.length ? running.join(' + ') : 'DCS as it is');
 }
@@ -2475,7 +2475,7 @@ function renderGuide() {
 const TOUR = [
   {title:'Welcome to DCS Control', text:'It sets DCS up for your headset (or the monitor) and makes it run faster. This short tour shows where everything is. You can open it again from Help & support.'},
   {target:'#nav-guide', title:'Feature guide', text:'What each feature does, what to expect and what it costs, in a few lines each. A good place to start.'},
-  {target:'#routeSwitch', title:'How you fly', text:'Pick Pimax, Sboys (SteamVR) or VDXR (Virtual Desktop) for VR, Desktop Enhanced for neural rendering, super resolution and frame generation on a monitor, or Optimizations only to keep DCS rendering unchanged.'},
+  {target:'#routeSwitch', title:'How you fly', text:'Pick Pimax, Sboys (SteamVR) or VDXR (Virtual Desktop) for VR, Desktop for neural rendering, super resolution and frame generation on a monitor, or Optimizations only to keep DCS rendering unchanged.'},
   {target:'#featureList', title:'What to turn on', text:'Tick the features you want. The arrow next to each one opens its settings.'},
   {target:'#nav-diagnostics', title:'Checks', text:'Before you fly, Checks lists anything to fix, with a button that takes you to the setting.'},
   {target:'#launch', title:'Launch DCS', text:'Always start DCS from here. It writes your profile into DCS first, then starts it.'},

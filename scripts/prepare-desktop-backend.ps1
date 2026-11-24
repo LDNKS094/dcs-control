@@ -7,6 +7,10 @@ if (-not $DistributionRoot) { $DistributionRoot = Join-Path $workspaceRoot 'arti
 $componentRoot = Join-Path $DistributionRoot 'components/optiscaler-nr'
 $runtimeRoot = Join-Path $workspaceRoot 'external/optiscaler-runtime'
 $runtime = Get-Content -LiteralPath (Join-Path $PSScriptRoot 'desktop-backend-runtime.json') -Raw | ConvertFrom-Json
+foreach ($name in @('OptiScaler/nvngx_dlssnr.dll', 'OptiScaler/nvngx_dlssnr.dll.sha256')) {
+    $obsolete = Join-Path $componentRoot $name
+    if (Test-Path -LiteralPath $obsolete -PathType Leaf) { Remove-Item -LiteralPath $obsolete }
+}
 $files = @()
 function Add-ComponentFile([string]$Source, [string]$Relative, [string]$ExpectedHash) {
     $hash = (Get-FileHash -LiteralPath $Source -Algorithm SHA256).Hash.ToLowerInvariant()

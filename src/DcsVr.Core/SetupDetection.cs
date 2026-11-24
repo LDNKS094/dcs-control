@@ -84,7 +84,7 @@ public static class SetupDetection
 
         var active = DetectActiveRoute(sources);
         if (current.UsesOptiScaler)
-            notes.Add("Desktop Enhanced stays selected for monitor rendering.");
+            notes.Add("Desktop mode stays selected for monitor rendering.");
         else if (current.Runtime == RuntimeKind.Vdxr && !current.Desktop)
             notes.Add("VDXR stays selected. Connect Quest 3 in Virtual Desktop and select the matching headset refresh rate here.");
         else if (active.Route is { } route)

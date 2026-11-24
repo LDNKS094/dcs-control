@@ -367,8 +367,8 @@ public static class ProfileValidation
             issues.Add(new("nvidia-mfaa", IssueSeverity.Warning, $"NVIDIA's Antialiasing - MFAA is On in {mfaa.Where}. With it on the driver gives DCS no D3D11 command lists, so Multi-threaded shadows and G-buffer (the biggest engine gains) cannot run; everything else still does. {mfaa.Fix}, then launch DCS again."));
         if (!profile.Desktop && profile.EyeDistance == EyeDistanceSource.Manual && !(profile.EyeDistanceMm is >= VrProfile.EyeDistanceMin and <= VrProfile.EyeDistanceMax))
             Error("eye-distance", $"Eye distance must be between {VrProfile.EyeDistanceMin:0} and {VrProfile.EyeDistanceMax:0} mm.");
-        if (profile.NeuralRendering && string.IsNullOrWhiteSpace(profile.NeuralRuntimePath))
-            Error("neural-runtime", "DLSS 5 needs NVIDIA's runtime file, nvngx_dlssnr.dll. Select it on the DLSS page: DCS Control keeps a verified copy, so you select it only once.");
+        if (profile.UsesNeuralRuntime && string.IsNullOrWhiteSpace(profile.NeuralRuntimePath))
+            Error("neural-runtime", "Select nvngx_dlssnr.dll under Runtime file on the rendering settings page. DCS Control keeps a verified copy for future launches.");
         if (inventory is not null)
         {
             if (inventory.DcsRunning) Error("dcs-running", "Close DCS before applying or restoring a profile.");

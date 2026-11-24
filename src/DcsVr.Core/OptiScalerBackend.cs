@@ -9,19 +9,22 @@ public static class OptiScalerBackend
     public const string IniName = "OptiScaler.ini";
     public const string ChainedName = "dxgi-original.dll";
     public const string ComponentFolder = "components/optiscaler-nr";
+    public const string NeuralRuntimePath = "OptiScaler/" + NeuralRuntimeStore.FileName;
     public sealed record Component(string Path, string Sha256);
     public sealed record Manifest(IReadOnlyList<Component> Files, string? SourceCommit = null, string? RuntimeSourceCommit = null);
 
     public static IReadOnlyList<Component> ReadFiles(string directory)
     {
         var manifest = JsonData.Deserialize<Manifest>(File.ReadAllText(Path.Combine(directory, "manifest.json")));
-        foreach (var file in manifest.Files)
+        // Older development packages listed the user-supplied DLL in the component manifest.
+        var files = manifest.Files.Where(file => !file.Path.Equals(NeuralRuntimePath, StringComparison.OrdinalIgnoreCase)).ToArray();
+        foreach (var file in files)
         {
             var path = PathPolicy.UnderRoot(directory, file.Path);
             if (!Hashing.FileSha256(path).Equals(file.Sha256, StringComparison.OrdinalIgnoreCase))
                 throw new InvalidDataException("Rendering component hash differs from manifest.json: " + file.Path);
         }
-        return manifest.Files;
+        return files;
     }
 
     public static string SavedPath(string managedRoot, string profileId) =>

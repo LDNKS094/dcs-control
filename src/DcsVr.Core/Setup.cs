@@ -46,7 +46,7 @@ public static class Readiness
             Add("foreign-dxgi", CheckState.Warning, "Another program's dxgi.dll", profile.UsesOptiScaler
                 ? profile.KeepOtherDxgi
                     ? $"DCS's bin folder has a dxgi.dll from {dxgi.Name} ({dxgi.Path}). DCS Control backs it up and loads it through dxgi-original.dll. You can change this choice in DCS settings. Back to stock DCS restores the original."
-                    : $"DCS's bin folder has a dxgi.dll from {dxgi.Name} ({dxgi.Path}). It is backed up and set aside while Desktop Enhanced is applied. Back to stock DCS restores the original."
+                    : $"DCS's bin folder has a dxgi.dll from {dxgi.Name} ({dxgi.Path}). It is backed up and set aside while Desktop mode is applied. Back to stock DCS restores the original."
                 : profile.KeepOtherDxgi
                 ? $"DCS's bin folder has a dxgi.dll from {dxgi.Name} ({dxgi.Path}). DLSS 5 needs that file name, so Launch DCS backs it up and loads it together with DLSS 5: {dxgi.Name} keeps working. If DCS misbehaves with both, turn off Keep another program's dxgi.dll working on the DLSS page."
                 : $"DCS's bin folder has a dxgi.dll from {dxgi.Name} ({dxgi.Path}). DLSS 5 needs that file name, so Launch DCS backs it up and sets it aside while this profile is applied: {dxgi.Name} is off in DCS until Back to stock DCS puts it back.");

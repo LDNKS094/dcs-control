@@ -2,7 +2,7 @@
 
 ## DCS Control integration fork
 
-This fork adds **VDXR** with the [Cheeky DCS fork](https://github.com/LDNKS094/CheekyFoveatedDLSS) and **Desktop Enhanced** with the [OptiScaler NR DCS fork](https://github.com/LDNKS094/OptiScaler-DLSSNR-PreSR-Multipass). Both profiles are available in the same build from `integration`. The `main` branch follows [upstream DCS Control](https://github.com/NIGos/dcs-control).
+This fork adds **VDXR** with the [Cheeky DCS fork](https://github.com/LDNKS094/CheekyFoveatedDLSS) and **Desktop** with the [OptiScaler NR DCS fork](https://github.com/LDNKS094/OptiScaler-DLSSNR-PreSR-Multipass). Both profiles are available in the same build from `expanded`. The `main` branch follows [upstream DCS Control](https://github.com/NIGos/dcs-control).
 
 See [Integration build](docs/INTEGRATION_BUILD.md) for the pinned dependencies and build commands.
 

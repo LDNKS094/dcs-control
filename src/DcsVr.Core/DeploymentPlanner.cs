@@ -207,7 +207,7 @@ public sealed class DeploymentPlanner(ComponentLocations components)
 
         if (profile.UsesOptiScaler)
         {
-            var source = RequireDirectory(components.OptiScalerDirectory, "Prepare the Desktop Enhanced components with scripts/prepare-desktop-backend.ps1.");
+            var source = RequireDirectory(components.OptiScalerDirectory, "Prepare the Desktop components with scripts/prepare-desktop-backend.ps1.");
             foreach (var file in OptiScalerBackend.ReadFiles(source))
             {
                 var path = PathPolicy.UnderRoot(source, file.Path);
@@ -215,22 +215,22 @@ public sealed class DeploymentPlanner(ComponentLocations components)
                 if (file.Path.Equals(OptiScalerBackend.IniName, StringComparison.OrdinalIgnoreCase))
                     Add(destination, OptiScalerBackend.Configuration(File.ReadAllText(path), desktopConfiguration, profile), "Monitor rendering settings",
                         iniValues: OptiScalerBackend.ConfigurationValues(profile));
-                else if (Path.GetFileName(file.Path).Equals(NeuralRuntimeStore.FileName, StringComparison.OrdinalIgnoreCase))
-                {
-                    var runtime = File.ReadAllBytes(profile.NeuralRuntimePath!);
-                    if (neuralSha256 is not null && Hashing.BytesSha256(runtime) != neuralSha256)
-                        throw new InvalidDataException("The saved DLSS 5 runtime hash has changed.");
-                    NativeBinary.VerifyNeuralRuntime(runtime, allowModified: true);
-                    Add(destination, runtime, "Shared DLSS 5 runtime");
-                }
                 else
                     // The backend writes either one log or tick-suffixed logs beside its loader.
                     Add(destination, File.ReadAllBytes(path), "Monitor rendering component " + file.Path,
                         runtimeLogs: file.Path.Equals("dxgi.dll", StringComparison.OrdinalIgnoreCase)
                             ? new[] { "OptiScaler.log", "OptiScaler_*.log" }.Select(name => Path.Combine(bin, name)).ToArray() : null);
             }
+            if (profile.UsesNeuralRuntime)
+            {
+                var runtime = File.ReadAllBytes(profile.NeuralRuntimePath!);
+                if (neuralSha256 is not null && Hashing.BytesSha256(runtime) != neuralSha256)
+                    throw new InvalidDataException("The saved DLSS 5 runtime hash has changed.");
+                NativeBinary.VerifyNeuralRuntime(runtime, allowModified: true);
+                Add(PathPolicy.UnderRoot(bin, OptiScalerBackend.NeuralRuntimePath), runtime, "User-supplied DLSS 5 runtime");
+            }
             if (chainedDxgi is not null)
-                Add(PathPolicy.UnderRoot(bin, OptiScalerBackend.ChainedName), chainedDxgi, "Your own dxgi.dll, loaded with Desktop Enhanced");
+                Add(PathPolicy.UnderRoot(bin, OptiScalerBackend.ChainedName), chainedDxgi, "Your own dxgi.dll, loaded in Desktop mode");
         }
         if (profile.UsesRenderingLifecycle)
         {

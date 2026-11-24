@@ -1418,7 +1418,17 @@ Test("DesktopEnhanced keeps screen backend settings per profile and restores the
             SuperResolution = false, Quality = "Balanced", FrameGeneration = true, FrameGenerationFactor = 3
         }
     };
-    var b = a with { Id = "desktop-enhanced-b", Name = "Screen B", HudAfterDlss = null, OptiScaler = new() { Quality = "Balanced", MatchDisplayRefresh = false } };
+    var b = a with { Id = "desktop-enhanced-b", Name = "Screen B", HudAfterDlss = null, OptiScaler = new() { NeuralRendering = false, Quality = "Balanced", MatchDisplayRefresh = false } };
+    var desktopNr = a with { OptiScaler = a.OptiScaler with { NeuralRendering = true } };
+    Require(ProfileValidation.Validate(desktopNr.ForLaunch()).Any(i => i.Code == "neural-runtime"),
+        "Desktop NR requires the shared runtime when enabled");
+    if (RealNeuralRuntime() is { } neural)
+    {
+        var saved = service.RememberNeuralRuntime(neural);
+        var desktopNrPlan = service.Preview(desktopNr, inventory);
+        var runtimeFile = desktopNrPlan.Files.Single(f => f.Path == Path.Combine(bin, "OptiScaler", "nvngx_dlssnr.dll"));
+        Require(Hashing.BytesSha256(runtimeFile.Content) == saved.Sha256, "Desktop deploys the saved NR runtime");
+    }
     Require(a.ForLaunch() is { UsesOptiScaler: true, UsesCheeky: false, NeuralRendering: false, FrameGen: FrameGeneration.Off }, "screen enhancement does not reuse the VR backend settings");
     Require(!(a with { Desktop = false }).UsesOptiScaler, "the retained screen switch is inactive on a VR route");
     var runtime = Make("desktop-enhanced/runtime/runtime.json", "{\"runtime\":{\"library_path\":\"runtime.dll\"}}");
@@ -1427,6 +1437,8 @@ Test("DesktopEnhanced keeps screen backend settings per profile and restores the
     var vrPlan = new DeploymentPlanner(new(null, null, null, OptiScalerDirectory: components, DcsRenderDirectory: dcsRender)).Build(vr, inventory with { PimaxRuntime = runtime }, service.ManagedRoot);
     Require(vrPlan.LaunchEnvironment["XR_RUNTIME_JSON"] == runtime && vrPlan.Files.All(f => f.Path != ini && f.Path != dxgi && f.Path != adapterLua && f.Path != adapterDll), "a VR route ignores the retained screen panel settings and scene adapter");
     var first = service.Preview(a, inventory);
+    Require(first.Files.All(f => !f.Path.EndsWith("nvngx_dlssnr.dll", StringComparison.OrdinalIgnoreCase)),
+        "Desktop can use SR and FG without an NR runtime");
     Require(first.LaunchEnvironment.Keys.All(k => !k.StartsWith("XR", StringComparison.OrdinalIgnoreCase) && !k.StartsWith("DISABLE_", StringComparison.OrdinalIgnoreCase)), "no XR runtime or layers");
     Require(first.Files.All(f => !f.Path.Contains("Cheeky", StringComparison.OrdinalIgnoreCase) && !f.Path.Contains("ofxr", StringComparison.OrdinalIgnoreCase)), "only the screen backend is deployed");
     Require(File.ReadAllBytes(options).AsSpan().SequenceEqual(originalOptions) && File.ReadAllBytes(ini).AsSpan().SequenceEqual(originalIni), "Preview leaves the game untouched");
@@ -1436,7 +1448,7 @@ Test("DesktopEnhanced keeps screen backend settings per profile and restores the
     var menuKeys = OptiScalerBackend.ConfigurationValues(a with { DesktopMenuKey = "121:3" });
     Require(menuKeys["Menu.ShortcutKey"] == "121" && menuKeys["Menu.ShortcutKeyRequireCtrl"] == "true"
         && menuKeys["Menu.ShortcutKeyRequireAlt"] == "true" && !keepLimit.ContainsKey("Menu.ShortcutKey"),
-        "Desktop Enhanced writes the recorded key and modifiers when the profile specifies them");
+        "Desktop writes the recorded key and modifiers when the profile specifies them");
     Require(!keepLimit.ContainsKey("Framerate.FramerateLimit"), "Keep leaves the saved Opti limit untouched");
     Require(controls["V-Sync.OverrideVsync"] == "true" && controls["V-Sync.ForceVsync"] == "false", "VSync off is applied through the backend");
     var autoTarget = OptiScalerBackend.ConfigurationValues(a with { OptiScaler = a.OptiScaler with { FrameRateTarget = 0, FrameGenerationFactor = 6, VSync = null } });

@@ -727,22 +727,22 @@ window.runWebSmoke = async function() {
     check('VDXR menu requires a single key',ui.profile.vdxrMenuKey == null && $('input-vdxrMenuKey').classList.contains('capturing'));
     press(120);
     select('DesktopEnhanced',{engine:true});
-    check('Desktop Enhanced In Flight shows Insert and the engine switch',await visitInFlight('desktopMenuKey','Insert')
+    check('Desktop In Flight shows Insert and the engine switch',await visitInFlight('desktopMenuKey','Insert')
       && !$('setting-desktopMenuKey').hidden && $('setting-vdxrMenuKey').hidden
       && $('setting-colorModeKey').hidden && $('setting-neuralToggleKey').hidden && !$('setting-engineToggleKey').hidden);
     $('input-desktopMenuKey').click(); press(36,'ca');
     check('Both routes remember their own recorded menu key',ui.profile.vdxrMenuKey === '120:0' && ui.profile.desktopMenuKey === '36:3');
     $('feature-dlss').querySelector('.feature-open').click();
-    check('Desktop Enhanced exposes three rendering switches and its own NR page',!$('page-dlss').hidden
+    check('Desktop exposes three rendering switches and its own NR page',!$('page-dlss').hidden
       && !$('desktopDlssControls').hidden && $('desktopCompressionControls').closest('.page') === $('page-dlss')
       && ['dlss','sr','framegen'].every(key => !$('feature-'+key).hidden) && $('feature-quad').hidden);
     $('feature-sr').querySelector('.feature-open').click();
-    check('Desktop Enhanced opens its own Super Resolution page',!$('page-sr').hidden
+    check('Desktop opens its own Super Resolution page',!$('page-sr').hidden
       && !$('desktopSrControls').hidden && $('vdxrSrColumns').hidden
       && $('setting-hudAfterDlss').closest('.page').id === 'page-sr');
     ui.navigate('guide');
     guideCard('Super Resolution').querySelector('[data-guide-page]').click();
-    check('Desktop Enhanced Super Resolution guide opens its own page',!$('page-sr').hidden);
+    check('Desktop Super Resolution guide opens its own page',!$('page-sr').hidden);
     select('Vdxr',{quad:true});
     ui.navigate('pupil');
     select('Pimax',{quad:true,dlss:true,framegen:true});
