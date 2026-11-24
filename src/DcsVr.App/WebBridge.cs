@@ -119,6 +119,13 @@ internal sealed class WebBridge(ControlService service, Window? owner = null,
     private CancellationTokenSource? _downloadCancel;
     private (long Done, long Total)? _downloaded;
     private string? _updateMessage;
+    private static bool ManualUpdates =>
+#if DCSCONTROL_MANUAL_UPDATES
+        true;
+#else
+        false;
+#endif
+    private const string ExpandedReleasesPage = "https://github.com/LDNKS094/dcs-control/releases";
     /// <summary>The folder above files\ (the installation, or the unzipped release); an installation has installation.json there.</summary>
     private static string AppRoot => Path.GetDirectoryName(Path.TrimEndingDirectorySeparator(AppContext.BaseDirectory))!;
     private static bool Installed => File.Exists(Path.Combine(AppRoot, "installation.json"));
@@ -154,6 +161,9 @@ internal sealed class WebBridge(ControlService service, Window? owner = null,
         {
             try
             {
+                if (ManualUpdates && action is ("updateCheck" or "updateSettings" or "updateInstall" or "updateCancel"))
+                    return Reply(id, UpdateView());
+
                 switch (action)
                 {
                     case "updateCheck":
@@ -188,8 +198,8 @@ internal sealed class WebBridge(ControlService service, Window? owner = null,
                         break;
                     case "updatePage":
                         EnsureInteractive();
-                        var page = _lastCheck?.Update?.PageUrl ?? Updates.ReleasesPage;
-                        if (!page.StartsWith(Updates.ReleasesPage, StringComparison.Ordinal)) page = Updates.ReleasesPage;
+                        var page = ManualUpdates ? ExpandedReleasesPage : _lastCheck?.Update?.PageUrl ?? Updates.ReleasesPage;
+                        if (!ManualUpdates && !page.StartsWith(Updates.ReleasesPage, StringComparison.Ordinal)) page = Updates.ReleasesPage;
                         using (Process.Start(new ProcessStartInfo(page) { UseShellExecute = true })) { }
                         break;
                     case "updateInstall": await InstallUpdate(); break;
@@ -237,7 +247,7 @@ internal sealed class WebBridge(ControlService service, Window? owner = null,
         UpdateCheck? check; bool checking;
         lock (_updateLock) { check = _lastCheck; checking = _checking is not null; }
         var u = check?.Update;
-        return new { enabled = Settings.Load().CheckForUpdates, current = ProductInfo.Version, checking, checkedAt = check?.CheckedAt, error = check?.Error,
+        return new { manual = ManualUpdates, enabled = !ManualUpdates && Settings.Load().CheckForUpdates, current = ProductInfo.Version, checking, checkedAt = check?.CheckedAt, error = check?.Error,
             update = u is null ? null : new { version = u.Version, @short = u.Short, pageUrl = u.PageUrl, notes = u.Notes, published = u.Published, canInstall = u.CanInstall, bytes = u.SetupBytes },
             installing = _installing || _handedOff, handedOff = _handedOff, downloaded = _downloaded is { } d ? new { done = d.Done, total = d.Total } : null, message = _updateMessage,
             portable = !Installed, appFolder = Shown(AppRoot), installFolder = Shown(UpdateFolder()) };

@@ -2572,9 +2572,11 @@ function renderUpdates() {
   if (next) $('updateBannerText').textContent = `DCS Control ${next.short} is available`;
   $('railUpdate').hidden = !next;
   $('appVersionButton').title = next ? `DCS Control ${next.short} is available. Click for what's new in this version.` : "What's new in this version";
+  $('updateAuto').closest('.setting').hidden = Boolean(u?.manual);
   $('updateAuto').checked = Boolean(u?.enabled);
+  $('updateCheckNow').textContent = u?.manual ? 'View fork releases' : 'Check now';
   const checked = u?.checkedAt ? ` Checked ${new Date(u.checkedAt).toLocaleString('en-GB')}.` : '';
-  $('updateCheckStatus').textContent = !u ? '' : u.checking ? 'Checking GitHub…' : next ? `DCS Control ${next.short} is available.${checked}` : u.error ? u.error + checked
+  $('updateCheckStatus').textContent = !u ? '' : u.manual ? 'Download updates from the fork’s Releases page.' : u.checking ? 'Checking GitHub…' : next ? `DCS Control ${next.short} is available.${checked}` : u.error ? u.error + checked
     : u.checkedAt ? `You have the latest version (${shortVersion(u.current)}).${checked}` : u.enabled ? 'Not checked yet.' : 'Automatic checks are off. Check now still asks GitHub.';
   $('updateCheckNow').disabled = Boolean(u?.checking || u?.installing);
   if ($('updateDialog').open) renderUpdateDialog();
@@ -2660,7 +2662,7 @@ function initializeUpdates() {
   $('updateDialog').addEventListener('cancel',leaveUpdate);
   $('updatePage').addEventListener('click',() => request('updatePage').catch(showError));
   $('updateInstall').addEventListener('click',() => installUpdate());
-  $('updateCheckNow').addEventListener('click',() => checkUpdates(true));
+  $('updateCheckNow').addEventListener('click',() => updates?.manual ? request('updatePage').catch(showError) : checkUpdates(true));
   $('updateAuto').addEventListener('change',e => setUpdateChecks(e.target.checked));
 }
 async function initialize() {

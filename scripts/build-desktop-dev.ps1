@@ -4,7 +4,7 @@ param([string]$Output, [string]$OptiScalerNrRevision)
 $ErrorActionPreference = 'Stop'
 $workspaceRoot = Split-Path -Parent $PSScriptRoot
 if (-not $Output) { $Output = Join-Path $workspaceRoot 'artifacts/desktop-dev' }
-& dotnet publish (Join-Path $workspaceRoot 'src/DcsVr.App/DcsVr.App.csproj') -c Release -r win-x64 --self-contained false -o $Output --nologo
+& dotnet publish (Join-Path $workspaceRoot 'src/DcsVr.App/DcsVr.App.csproj') -c Release -r win-x64 --self-contained false -p:DcsControlManualUpdates=true -o $Output --nologo
 if ($LASTEXITCODE -ne 0) { throw 'Desktop development app build failed.' }
 & (Join-Path $PSScriptRoot 'build-optiscaler-nr.ps1') -DistributionRoot $Output -Revision $OptiScalerNrRevision
 

@@ -32,3 +32,5 @@ The VDXR build applies the DCS joint NR patch in a separate Cheeky worktree.
 ```
 
 Use a fresh output directory for the first build. Open `artifacts/integration/DcsControl.exe` and select VDXR or Desktop. The component manifests under `components` record the source revisions, the joint NR patch digest and the desktop runtime hashes.
+
+Get updates manually from the [fork’s Releases page](https://github.com/LDNKS094/dcs-control/releases).
