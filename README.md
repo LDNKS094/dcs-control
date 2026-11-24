@@ -1,15 +1,17 @@
 # DCS Control
 
-## DCS Control Expanded
+## About This Fork
 
-This fork of [DCS Control](https://github.com/NIGos/dcs-control) adds two rendering modes in one build:
+**DCS Control Expanded** adds two rendering modes to [DCS Control](https://github.com/NIGos/dcs-control).
 
-- **VDXR** uses [Cheeky](https://github.com/LDNKS094/CheekyFoveatedDLSS) for Quad Views, head-angle focus tracking and optical-flow frame generation. It can apply neural rendering to both the focus and peripheral views.
-- **Desktop** uses [OptiScaler NR](https://github.com/LDNKS094/OptiScaler-DLSSNR-PreSR-Multipass) for neural rendering, super resolution and frame generation on a monitor.
+- **VDXR** with [Cheeky](https://github.com/LDNKS094/CheekyFoveatedDLSS)
+  - Quad Views with head-tracked focus
+  - Hybrid optical-flow frame generation
+  - Neural rendering for both focus and peripheral views
+- **Desktop** with [OptiScaler NR](https://github.com/LDNKS094/OptiScaler-DLSSNR-PreSR-Multipass)
+  - Neural rendering, super resolution, and frame generation on a monitor
 
-The Alpha covers these two modes. Extract the portable ZIP and run `DcsControl.exe` on Windows with .NET Desktop Runtime 10 and WebView2. To use neural rendering, import `nvngx_dlssnr.dll` once in DCS Control.
-
-Use the `expanded` branch for this fork. The `main` branch follows upstream. See [Integration build](docs/INTEGRATION_BUILD.md) for the pinned dependencies and build commands.
+## Original README
 
 A free Windows app for DCS World that runs **DLSS 5, frame generation and Quad Views foveated rendering together in VR** (Pimax), set up and launched with one button, and makes DCS run faster for every pilot, on a monitor or any headset.
 
