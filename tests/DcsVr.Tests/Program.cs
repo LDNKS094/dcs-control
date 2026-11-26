@@ -1290,6 +1290,10 @@ Test("VDXR uses native quad views and optical flow frame generation, then restor
     var inventory = new InventorySnapshot { DcsExecutable = exe, OptionsPath = options, VdxrRuntime = runtime };
     var oldBias = ProfileValidation.ResolveFeatures(profile with { VdxrFocusHorizontalBias = 90, VdxrFocusVerticalBias = -90 });
     Require(oldBias.VdxrFocusHorizontalBias == 45 && oldBias.VdxrFocusVerticalBias == -45, "Saved VDXR offsets adopt the new range");
+    var narrow = profile with { VdxrFocusWidth = 1 };
+    Require(ProfileValidation.Validate(narrow).Any(i => i.Code == "vdxr-focus-width")
+        && !ProfileValidation.Validate(narrow with { QuadViews = QuadProvider.None }).Any(i => i.Code == "vdxr-focus-width"),
+        "Focus dimensions are validated when native Quad Views uses them");
     var service = new ControlService(Path.Combine(root, "vdxr/distribution"), Path.Combine(root, "vdxr/state"));
     var adapter = Path.Combine(root, "vdxr/dcsrender");
     foreach (var file in new[] { "DcsRender.dll", "DcsRender.lua" }) Make("vdxr/dcsrender/" + file, "managed " + file);

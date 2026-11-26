@@ -76,25 +76,29 @@ public static class ProfileValidation
         Range("quad-sharpening", profile.QuadSharpening, 0, 1);
         Range("quad-periphery-contrast", profile.QuadPeripheryContrast, 0, 1);
         Range("quad-edge-blend", profile.QuadEdgeBlend, 0, .5);
-        Range("vdxr-focus-width", profile.VdxrFocusWidth, 25, 100);
-        Range("vdxr-focus-height", profile.VdxrFocusHeight, 25, 100);
-        Range("vdxr-focus-corner-radius", profile.VdxrFocusCornerRadius, 0, 50);
-        Range("vdxr-focus-feather", profile.VdxrFocusFeather, 0, 50);
-        Range("vdxr-focus-reference-distance", profile.VdxrFocusReferenceDistance, .25, 10);
-        Range("vdxr-center-supersampling", profile.VdxrCenterSupersampling, 1, 2);
-        if (!VrProfile.FocusDlssPresets.Contains(profile.VdxrCenterPreset))
-            Error("vdxr-center-preset", "Select a center DLSS preset.");
-        Range("vdxr-sr-threshold", profile.VdxrSrThreshold, 50, 90);
-        Range("vdxr-nr-preset", profile.VdxrNrPreset, 0, 2);
-        Range("vdxr-nr-threshold", profile.VdxrNrThreshold, 50, 90);
-        if (!Enum.IsDefined(profile.VdxrFrameGenMethod))
+        if (profile.UsesVdxrQuadViews)
+        {
+            Range("vdxr-focus-width", profile.VdxrFocusWidth, 25, 100);
+            Range("vdxr-focus-height", profile.VdxrFocusHeight, 25, 100);
+            Range("vdxr-focus-corner-radius", profile.VdxrFocusCornerRadius, 0, 50);
+            Range("vdxr-focus-feather", profile.VdxrFocusFeather, 0, 50);
+            Range("vdxr-focus-reference-distance", profile.VdxrFocusReferenceDistance, .25, 10);
+            Range("vdxr-center-supersampling", profile.VdxrCenterSupersampling, 1, 2);
+            if (!VrProfile.FocusDlssPresets.Contains(profile.VdxrCenterPreset))
+                Error("vdxr-center-preset", "Select a center DLSS preset.");
+            Range("vdxr-sr-threshold", profile.VdxrSrThreshold, 50, 90);
+            Range("vdxr-nr-threshold", profile.VdxrNrThreshold, 50, 90);
+            Range("vdxr-focus-horizontal-bias", profile.VdxrFocusHorizontalBias, -VrProfile.VdxrFocusMaxBias, VrProfile.VdxrFocusMaxBias);
+            Range("vdxr-focus-horizontal-angle-gain", profile.VdxrFocusHorizontalAngleGain, -1, 1);
+            Range("vdxr-focus-horizontal-deadzone", profile.VdxrFocusHorizontalDeadzone, 0, 10);
+            Range("vdxr-focus-vertical-bias", profile.VdxrFocusVerticalBias, -VrProfile.VdxrFocusMaxBias, VrProfile.VdxrFocusMaxBias);
+            Range("vdxr-focus-vertical-angle-gain", profile.VdxrFocusVerticalAngleGain, -1, 1);
+            Range("vdxr-focus-vertical-deadzone", profile.VdxrFocusVerticalDeadzone, 0, 10);
+        }
+        if (profile.Runtime == RuntimeKind.Vdxr && profile.NeuralRendering)
+            Range("vdxr-nr-preset", profile.VdxrNrPreset, 0, 2);
+        if (profile.UsesCheekyFrameGeneration && !Enum.IsDefined(profile.VdxrFrameGenMethod))
             Error("vdxr-framegen-method", "Select an Optiflow method.");
-        Range("vdxr-focus-horizontal-bias", profile.VdxrFocusHorizontalBias, -VrProfile.VdxrFocusMaxBias, VrProfile.VdxrFocusMaxBias);
-        Range("vdxr-focus-horizontal-angle-gain", profile.VdxrFocusHorizontalAngleGain, -1, 1);
-        Range("vdxr-focus-horizontal-deadzone", profile.VdxrFocusHorizontalDeadzone, 0, 10);
-        Range("vdxr-focus-vertical-bias", profile.VdxrFocusVerticalBias, -VrProfile.VdxrFocusMaxBias, VrProfile.VdxrFocusMaxBias);
-        Range("vdxr-focus-vertical-angle-gain", profile.VdxrFocusVerticalAngleGain, -1, 1);
-        Range("vdxr-focus-vertical-deadzone", profile.VdxrFocusVerticalDeadzone, 0, 10);
         Range("periphery-stability-strength", profile.PeripheryStabilityStrength, 0, 1);
         Range("neural-scale", profile.NeuralWorkingScale, .1, 1);
         Range("neural-intensity", profile.NeuralIntensity, 0, 1);
