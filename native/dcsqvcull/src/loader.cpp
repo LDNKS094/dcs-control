@@ -187,12 +187,6 @@ DcsQvLoaderApi g_api;
 
 // ---- payload management ----
 DcsQvPayloadStopFn g_stopActive = nullptr;
-std::atomic<DcsQvPayloadCaptureStateFn> g_captureState{nullptr};
-std::atomic<DcsQvPayloadPreLdrSceneFn> g_preLdrScene{nullptr};
-std::atomic<DcsQvPayloadProjectedUiFn> g_projectedUi{nullptr};
-std::atomic<DcsQvPayloadUiEnableFn> g_uiEnable{nullptr};
-std::atomic<DcsQvPayloadStageReplayEnableFn> g_stageReplayEnable{nullptr};
-std::atomic<DcsQvPayloadStageReplayAcquireFn> g_stageReplayAcquire{nullptr};
 // The active payload's optional exit/mission exports (null for older payloads).
 std::atomic<DcsQvPayloadQuiesceFn> g_quiesceActive{nullptr};
 std::atomic<DcsQvPayloadMissionEventFn> g_missionActive{nullptr};
@@ -247,23 +241,11 @@ LoadResult LoadPayload(const std::wstring& src) {
   auto gload = reinterpret_cast<DcsQvPayloadGLoadFn>(GetProcAddress(m, "DcsQvPayload_GLoad"));  // R51
   auto gloadWanted =
       reinterpret_cast<DcsQvPayloadGLoadWantedFn>(GetProcAddress(m, "DcsQvPayload_GLoadWanted"));  // R90
-  auto captureState=reinterpret_cast<DcsQvPayloadCaptureStateFn>(GetProcAddress(m,"DcsQvPayload_GetCaptureStateV1"));
-  auto preLdrScene=reinterpret_cast<DcsQvPayloadPreLdrSceneFn>(GetProcAddress(m,"DcsQvPayload_GetPreLdrSceneV1"));
-  auto projectedUi=reinterpret_cast<DcsQvPayloadProjectedUiFn>(GetProcAddress(m,"DcsQvPayload_GetProjectedUiV1"));
-  auto uiEnable=reinterpret_cast<DcsQvPayloadUiEnableFn>(GetProcAddress(m,"DcsQvPayload_SetUiEnabledV1"));
-  auto stageReplayEnable=reinterpret_cast<DcsQvPayloadStageReplayEnableFn>(GetProcAddress(m,"DcsQvPayload_SetStageReplayEnabledV1"));
-  auto stageReplayAcquire=reinterpret_cast<DcsQvPayloadStageReplayAcquireFn>(GetProcAddress(m,"DcsQvPayload_AcquireStageReplayV1"));
   std::unique_lock<std::timed_mutex> swap(g_swapMutex);
   if (g_exiting.load()) {
     Logf("loader: DCS is shutting down; payload not started");
     return kLoadFailed;
   }
-  g_captureState.store(nullptr);
-  g_preLdrScene.store(nullptr);
-  g_projectedUi.store(nullptr);
-  g_uiEnable.store(nullptr);
-  g_stageReplayEnable.store(nullptr);
-  g_stageReplayAcquire.store(nullptr);
   g_quiesceActive.store(nullptr);
   g_missionActive.store(nullptr);
   g_gloadActive.store(nullptr);
@@ -308,12 +290,6 @@ LoadResult LoadPayload(const std::wstring& src) {
   }
   Logf("loader: starting payload %ls (generation %u)", name, g_generation);
   g_stopActive = stop;
-  g_captureState.store(captureState);
-  g_preLdrScene.store(preLdrScene);
-  g_projectedUi.store(projectedUi);
-  g_uiEnable.store(uiEnable);
-  g_stageReplayEnable.store(stageReplayEnable);
-  g_stageReplayAcquire.store(stageReplayAcquire);
   g_quiesceActive.store(quiesce);
   g_missionActive.store(mission);
   g_gloadActive.store(gload);
@@ -418,12 +394,6 @@ extern "C" __declspec(dllexport) int luaopen_DcsQvCull(void* /*lua_State*/) { re
 // Idempotent; bounded (3 s).
 extern "C" __declspec(dllexport) int DcsQvCull_Shutdown(void* /*lua_State*/) {
   if (g_exiting.exchange(true)) return 0;
-  g_captureState.store(nullptr);
-  g_preLdrScene.store(nullptr);
-  g_projectedUi.store(nullptr);
-  g_uiEnable.store(nullptr);
-  g_stageReplayEnable.store(nullptr);
-  g_stageReplayAcquire.store(nullptr);
   Logf("loader: DCS is shutting down (Lua state closing); quiescing the payload");
   std::unique_lock<std::timed_mutex> swap(g_swapMutex, std::defer_lock);
   if (!swap.try_lock_for(std::chrono::milliseconds(3000))) {
@@ -508,40 +478,6 @@ extern "C" __declspec(dllexport) unsigned long long DcsQvCull_Status() {
 // not running (no payload, payload swap, after stop).
 extern "C" __declspec(dllexport) uint64_t DcsQvCull_DualCameraStatus() {
   return g_dualStatus.load(std::memory_order_acquire);
-}
-
-// Use the existing payload swap gate; the payload itself only returns atomic metadata.
-extern "C" __declspec(dllexport) BOOL __cdecl DcsQvCull_GetCaptureStateV1(uint64_t* frame,uint32_t* view,BOOL* selected) {
-  std::unique_lock<std::timed_mutex> swap(g_swapMutex,std::try_to_lock);
-  if(!swap.owns_lock()||g_exiting.load())return FALSE;
-  auto query=g_captureState.load();return query?query(frame,view,selected):FALSE;
-}
-// The caller owns the returned texture reference and consumes it in this frame.
-extern "C" __declspec(dllexport) BOOL __cdecl DcsQvCull_GetPreLdrSceneV1(uint64_t frame,uint32_t view,ID3D11Texture2D** texture) {
-  std::unique_lock<std::timed_mutex> swap(g_swapMutex,std::try_to_lock);
-  if(!swap.owns_lock()||g_exiting.load())return FALSE;
-  auto query=g_preLdrScene.load();return query?query(frame,view,texture):FALSE;
-}
-// The caller owns a strict same-frame UI texture lease, including its alpha.
-extern "C" __declspec(dllexport) BOOL __cdecl DcsQvCull_GetProjectedUiV1(uint64_t frame,uint32_t view,ID3D11Texture2D** texture) {
-  std::unique_lock<std::timed_mutex> swap(g_swapMutex,std::try_to_lock);
-  if(!swap.owns_lock()||g_exiting.load())return FALSE;
-  auto query=g_projectedUi.load();return query?query(frame,view,texture):FALSE;
-}
-extern "C" __declspec(dllexport) void __cdecl DcsQvCull_SetUiEnabledV1(BOOL enabled) {
-  std::unique_lock<std::timed_mutex> swap(g_swapMutex,std::try_to_lock);
-  if(!swap.owns_lock()||g_exiting.load())return;
-  auto fn=g_uiEnable.load();if(fn)fn(enabled);
-}
-extern "C" __declspec(dllexport) void __cdecl DcsQvCull_SetStageReplayEnabledV1(BOOL enabled) {
-  std::unique_lock<std::timed_mutex> swap(g_swapMutex,std::try_to_lock);
-  if(!swap.owns_lock()||g_exiting.load())return;
-  auto fn=g_stageReplayEnable.load();if(fn)fn(enabled);
-}
-extern "C" __declspec(dllexport) BOOL __cdecl DcsQvCull_AcquireStageReplayV1(uint64_t frame,uint32_t view,CheekyStageReplayViewV1* out) {
-  std::unique_lock<std::timed_mutex> swap(g_swapMutex,std::try_to_lock);
-  if(!swap.owns_lock()||g_exiting.load())return FALSE;
-  auto fn=g_stageReplayAcquire.load();return fn?fn(frame,view,out):FALSE;
 }
 
 BOOL APIENTRY DllMain(HMODULE module, DWORD reason, LPVOID) {

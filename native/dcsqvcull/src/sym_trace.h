@@ -98,9 +98,7 @@ inline UINT BytesPerTexel(DXGI_FORMAT f) {
     case DXGI_FORMAT_R16G16B16A16_TYPELESS:
     case DXGI_FORMAT_R16G16B16A16_UNORM:
     case DXGI_FORMAT_R32G32_FLOAT:
-    case DXGI_FORMAT_R32G32_TYPELESS:
-    case DXGI_FORMAT_R32G8X24_TYPELESS:
-    case DXGI_FORMAT_D32_FLOAT_S8X24_UINT: return 8;
+    case DXGI_FORMAT_R32G32_TYPELESS: return 8;
     case DXGI_FORMAT_R32G32B32A32_FLOAT:
     case DXGI_FORMAT_R32G32B32A32_TYPELESS: return 16;
     case DXGI_FORMAT_R8G8B8A8_TYPELESS:
@@ -113,11 +111,7 @@ inline UINT BytesPerTexel(DXGI_FORMAT f) {
     case DXGI_FORMAT_R10G10B10A2_TYPELESS:
     case DXGI_FORMAT_R11G11B10_FLOAT:
     case DXGI_FORMAT_R32_FLOAT:
-    case DXGI_FORMAT_R32_TYPELESS:
-    case DXGI_FORMAT_D32_FLOAT:
-    case DXGI_FORMAT_R24G8_TYPELESS:
-    case DXGI_FORMAT_D24_UNORM_S8_UINT:
-    case DXGI_FORMAT_R24_UNORM_X8_TYPELESS: return 4;
+    case DXGI_FORMAT_R32_TYPELESS: return 4;
     default: return 0;
   }
 }
@@ -228,7 +222,7 @@ inline void ReleaseTargets() {
 // A copy of one texture subresource into a new staging texture (render thread). False: not copied (counted).
 inline bool Capture(int v, const char* tag, ID3D11Resource* src, UINT sub) {
   State& s = fixdepth::g_s;
-  if (!src || !s.dev || !s.ctx || v < 0 || v > 4 || (v < 4 && !(g_views & (1 << v)))) return false;
+  if (!src || !s.dev || !s.ctx || v < 0 || v > 3 || !(g_views & (1 << v))) return false;
   D3D11_RESOURCE_DIMENSION dim{};
   src->GetType(&dim);
   if (dim != D3D11_RESOURCE_DIMENSION_TEXTURE2D) {
@@ -334,8 +328,23 @@ inline void OnBoundary(void* pass, bool begin, int k) {
   char n[48];
   fixdepth::PassName(pass, n, sizeof(n));
   Line("P %c %d %s", begin ? 'B' : 'E', s.hmdOrd, n);
-  // The temporary stage probe captures actual bindings instead of reusing
-  // the tone-map target for subsequent passes.
+  const int v = s.hmdOrd;
+  if (v < 0 || v > 3) return;
+  if (begin && strcmp(n, "OverlayHDRPass") == 0 && !g_preDone[v] && g_hdr[v].res &&
+      s.frame - g_hdr[v].frame <= 2) {
+    g_preDone[v] = true;
+    g_preRes[v] = g_hdr[v].res;
+    Capture(v, "hdr_pre", g_hdr[v].res, g_hdr[v].sub);
+  }
+  const bool ldrNow = g_ldr[v].res && g_ldr[v].frame == s.frame;  // this frame's tone-map target
+  if (begin && (strcmp(n, "OverlayLDRPass") == 0 || k == plod::kHmd) && !g_tmDone[v] && ldrNow) {
+    g_tmDone[v] = true;
+    Capture(v, "ldr_tm", g_ldr[v].res, g_ldr[v].sub);
+  }
+  if (!begin && strcmp(n, "OverlayLDRPass") == 0 && !g_postDone[v] && ldrNow) {
+    g_postDone[v] = true;
+    Capture(v, "ldr_post", g_ldr[v].res, g_ldr[v].sub);
+  }
 }
 
 // The tone-map draw of HMD view v (fixation_depth.h DrawPre, before any pixel shader swap): learn its PS SRV0 (the
@@ -464,16 +473,6 @@ inline void RenderPost(int c9) {
 // pending copies polled, the next frame's role decided.
 inline void EndFrame() {
   State& s = fixdepth::g_s;
-  bool trigger=false;
-  wchar_t triggerPath[32768]{};
-  static FILETIME lastTrigger{};
-  if(GetEnvironmentVariableW(L"DCS_CAPTURE_TRIGGER",triggerPath,32768)) {
-    WIN32_FILE_ATTRIBUTE_DATA info{};
-    if(GetFileAttributesExW(triggerPath,GetFileExInfoStandard,&info)&&CompareFileTime(&info.ftLastWriteTime,&lastTrigger)!=0) {
-      lastTrigger=info.ftLastWriteTime;trigger=true;
-    }
-  }
-  if(trigger) symtrcfg::g_req.store(1);
   if (g_on.load(std::memory_order_relaxed)) {
     if (g_rep.open) ReplayEnd();
     Out o;

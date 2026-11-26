@@ -11,15 +11,6 @@
 
 #include <atomic>
 #include <cstdint>
-#include "stage_replay_api.h"
-
-using DcsQvPayloadCaptureStateFn = int (__cdecl*)(uint64_t*,uint32_t*,int*);
-struct ID3D11Texture2D;
-using DcsQvPayloadPreLdrSceneFn = int (__cdecl*)(uint64_t,uint32_t,ID3D11Texture2D**);
-using DcsQvPayloadProjectedUiFn = int (__cdecl*)(uint64_t,uint32_t,ID3D11Texture2D**);
-using DcsQvPayloadUiEnableFn = void (__cdecl*)(int);
-using DcsQvPayloadStageReplayEnableFn = void (__cdecl*)(int);
-using DcsQvPayloadStageReplayAcquireFn = int (__cdecl*)(uint64_t,uint32_t,CheekyStageReplayViewV1*);
 
 struct DcsQvLoaderApi {
   uint32_t version;  // kDcsQvLoaderApiVersion

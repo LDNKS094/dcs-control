@@ -1048,18 +1048,6 @@ void PassName(void* pass, char* out, size_t cap);
 bool ForeignTableHooks();
 ID3D11Resource* PassDepthTexNow();
 #include "sym_trace.h"  // R94: [Perception] SymbologyTrace (dev, default off): the live HUD trace (ovl_cpu.h reports into it)
-namespace scapture {
-extern bool active;
-void Rearm();
-bool Lost(void**);
-void Observe(bool);
-bool BeginUiReplay(unsigned variant);
-void EndUiReplay();
-template<int Kind,class... Args>void RecordGuiDraw(ID3D11DeviceContext*,Args...);
-template<int Kind,class... Args>void RecordStageDraw(ID3D11DeviceContext*,Args...);
-void Boundary(void*,bool);
-void Close(bool save=true);
-}
 #include "cockpit_ipd.h"
 
 // ---------------------------------------------------------------------------
@@ -1771,18 +1759,7 @@ void OvlDrawSeh(ID3D11DeviceContext* c);  // below (cockpit ipd: an overlay pass
   if (c == g_s.ctx) ckipd::LightDrawSeen();                           \
   if (c == g_s.ctx && ckipd::t_cls == ckipd::kClsOvl) OvlDrawSeh(c);  \
   const int act = ours ? DrawPreSeh(KIND, COUNT, INST) : 0;            \
-  /* Replay before the real draw so depth tests see the same scene. */ \
-  for(unsigned variant=0;ours&&variant<2;++variant)                   \
-  if (scapture::BeginUiReplay(variant)) {                            \
-    scapture::RecordGuiDraw<KIND>(__VA_ARGS__);                       \
-    DrawRearm();                                                    \
-    reinterpret_cast<FN>(g_dOrig[KIND])(__VA_ARGS__);                  \
-    scapture::EndUiReplay();                                         \
-    /* OM changes and readback copies can switch the driver entries. */ \
-    DrawRearm();                                                    \
-  }                                                                 \
-  if(ours)scapture::RecordStageDraw<KIND>(__VA_ARGS__);               \
-  reinterpret_cast<FN>(g_dOrig[KIND])(__VA_ARGS__);                   \
+  reinterpret_cast<FN>(g_dOrig[KIND])(__VA_ARGS__);                    \
   if (ours) DrawPostSeh(act);
 bool SplitDrawSeh(ID3D11DeviceContext* c, UINT n, UINT sv);  // below (cockpit ipd phase 2)
 void STDMETHODCALLTYPE DhDraw(ID3D11DeviceContext* c, UINT n, UINT sv) {
@@ -1861,7 +1838,6 @@ void DisarmDraws() {
 void InPassRearm() {
   UsRearm();
   DrawRearm();
-  scapture::Rearm();
 }
 
 // d3d11 toggles 24 draw / copy / update / clear entries of the immediate
@@ -1951,7 +1927,6 @@ bool ArmNotOurs(void** vt) {
   if (g_drawArmed)
     for (int k = 0; k < fdexport::kDkCount; ++k)
       if (g_dSlot[k] >= 0 && vt[g_dSlot[k]] != DrawHookOf(k)) return true;
-  if (scapture::Lost(vt)) return true;
   return false;
 }
 extern int g_cpView;  // R47 (colour pass, below): a ToneMappingPass armed, its tone-map draw still to come
@@ -2698,7 +2673,6 @@ void DisarmUsOnly() {
   g_ovRtv = nullptr;
 }
 
-#include "stage_color_capture.h"
 #include "nr_native_passes.h"
 
 // Captures the G-buffer's depth target (bound inside the pass), viewport and
@@ -4480,8 +4454,31 @@ void SymTraceDisarm() {
   g_stArmOwn = false;
 }
 void SymTraceBoundary(void* pass, bool begin, int k) {
+  State& s = g_s;
   symtr::OnBoundary(pass, begin, k);
-  scapture::Boundary(pass,begin);
+  if (k == plod::kGBuffer && begin && (g_stTmView >= 0 || g_stArmOwn)) {  // a ToneMappingPass whose end did not come
+    g_stTmView = -1;
+    SymTraceDisarm();
+    return;
+  }
+  if (k != plod::kOther) return;
+  const int v = s.hmdOrd;
+  if (v < 0 || v > 3 || !s.ctx) return;
+  char n[48];
+  PassName(pass, n, sizeof(n));
+  if (strcmp(n, "ToneMappingPass") != 0) return;
+  if (!begin) {
+    g_stTmView = -1;
+    SymTraceDisarm();
+    return;
+  }
+  if (!symtr::g_learn || g_stTmView >= 0) return;
+  if (!g_armTable) g_stArmOwn = ArmOm(true);
+  ArmDraws();
+  if (g_drawArmed)
+    g_stTmView = v;
+  else
+    SymTraceDisarm();
 }
 // The tone map's first draw of view g_stTmView (DrawPre, before the colour pass's pixel shader swap).
 void SymTraceToneDraw(const D3D11_VIEWPORT& vp) {
@@ -4681,7 +4678,6 @@ void ColorPostSeh(int v, int act) {
 // pre-overlay copy is due right after it.
 int DrawPre(int kind, UINT count, UINT inst) {
   State& s = g_s;
-  scapture::Observe(false);
   if (!s.ctx || (!g_cmp.pending && !g_trOpen && g_hdrLearnView < 0 && g_tpView < 0 && g_spView < 0 && g_cpView < 0 &&
                  g_cpLearnView < 0 && g_fgView < 0 && g_stTmView < 0))
     return 0;
@@ -4699,6 +4695,7 @@ int DrawPre(int kind, UINT count, UINT inst) {
   if (g_trOpen) TraceDraw(kind, count, inst, rtv, res, vp, nvp);
   if (g_hdrLearnView >= 2) HdrLearnDraw(vp, nvp);
   if (g_tpView >= 0) ToneProbeDraw(vp);
+  if (g_stTmView >= 0) SymTraceToneDraw(vp);  // R94: before the colour pass's pixel shader swap below
   if (g_spView >= 0) SwapProbeDraw(vp);
   if (g_fgView >= 0) FgDraw(vp);  // R71: CockpitFgDump
   if (g_cpLearnView >= 0) ColorLearnDraw();  // R42: the view's image size (CopyToHMDPass source)
@@ -5414,13 +5411,9 @@ void EndFrame() {
   if (ckipd::g_on.load(std::memory_order_relaxed)) ckipd::EndFrame();
   if (cmask::g_on.load(std::memory_order_relaxed)) cmask::OnEndFrame();  // R65: a frame xrEndFrame did not commit
   ++s.verifyCounter;
-  scapture::Close();  // A missing selected-pass end closes before readback polling.
-  scapture::ExecuteGuiDeferred();
   ++s.frame;
   g_frames++;
-  symtr::EndFrame();
-  if(!symtr::g_learn)scapture::ReleaseLearned();  // Temporary session references end with the selected frame.
-  // R94: the traced frame's text out, its copies polled, the next frame's role (cheap while idle)
+  symtr::EndFrame();  // R94: the traced frame's text out, its copies polled, the next frame's role (cheap while idle)
   Poll();
   PollGrid();
   if ((s.frame & 63) == 0) EvictSrvs();
@@ -5605,7 +5598,6 @@ void DumpPassBoundary(void* pass, bool begin) {
 }
 
 void OnBoundaryInner(void* pass, bool begin) {
-  scapture::PublishToken();
   State& s = g_s;
   const int k = plod::KindRaw(pass);
   // R74b: mask v1.1 overlay symbology, an HMD view's OverlayHDRPass begin: its pre signature and its arm, before any
@@ -5615,8 +5607,7 @@ void OnBoundaryInner(void* pass, bool begin) {
   // uploads), its pass watch until the tone map, the overlay pass's end (an open run closes).
   if (k == plod::kOther && cmask::SymWanted() && cmask::Active()) cmask::sym::Boundary(pass, begin, s.hmdOrd);
   if (ProbesWanted()) ProbeBoundary(pass, begin, k);  // R41 live probes (dev, measure only)
-  if (symtr::Busy() || scapture::SceneWanted() || g_stTmView >= 0 || g_stArmOwn)
-    SymTraceBoundary(pass, begin, k);
+  if (symtr::Busy() || g_stTmView >= 0 || g_stArmOwn) SymTraceBoundary(pass, begin, k);  // R94 (dev, measure only)
   if (cpass::Wanted() || g_cpView >= 0 || g_cpLearnView >= 0 || g_cpArmOwn || g_cpLearnArmOwn || cpass::g_tp.open)
     ColorBoundary(pass, begin, k);  // R42 colour modes
   if (ckipd::g_dumpActive && k == plod::kOther && s.hmdOrd >= 0 && s.hmdOrd <= 3) {  // CockpitTrueIpdFrameDump
@@ -5989,7 +5980,8 @@ bool Install() {
   UnsyncViewCount();  // R46 / R48: the render thread may be mid-frame (before the boundary callback goes in)
   cpass::g_tp.open = false;
   ptiming::g_depthBoundary = &OnBoundary;
-  if(GetEnvironmentVariableW(L"DCS_NR_JOINT",nullptr,0))ptiming::g_executeOverride=&nrpass::DelayNativePassExecution;
+  if (GetEnvironmentVariableW(L"DCS_NR_JOINT", nullptr, 0))
+    ptiming::g_executeOverride = &nrpass::DelayNativePassExecution;
   g_rearmOk = true;
   sfilt::g_afterEcl = &AfterEclEntry;
   g_maskWith = cmask::Wanted();
@@ -6044,8 +6036,8 @@ void Uninstall(bool keepExports = true) {
   ckipd::g_on = false;  // the upload hooks forward DCS's bytes from now on
   ptiming::BoundaryFn me = &OnBoundary;
   ptiming::g_depthBoundary.compare_exchange_strong(me, nullptr);
-  ptiming::ExecuteOverrideFn executeOverride=&nrpass::DelayNativePassExecution;
-  ptiming::g_executeOverride.compare_exchange_strong(executeOverride,nullptr);
+  ptiming::ExecuteOverrideFn executeOverride = &nrpass::DelayNativePassExecution;
+  ptiming::g_executeOverride.compare_exchange_strong(executeOverride, nullptr);
   for (int i = 0; i < 200 && g_busy.load(); ++i) Sleep(5);
   if (g_busy.load()) Log("fixation depth: the boundary callback was still running at the uninstall (1 s)");
   Sleep(50);  // a callback that loaded the pointer but had not entered yet
@@ -6087,9 +6079,6 @@ void Uninstall(bool keepExports = true) {
   g_cpDrawView = -1;  // R58: after the drain (see above)
   g_cpAct = 0;
   g_stTmView = -1;  // R94
-  scapture::Close(false);scapture::ReleaseLearned();scapture::ReleaseScenes();
-  scapture::ReleaseGuiDeferred();
-  scapture::EnableStageReplay(false);
   g_stArmOwn = false;
   DisarmOm();  // a pass that began before the callback went out (draw entries too)
   g_rearmOk = true;  // nothing of ours is armed now (g_armTable null): a re-arm needs a new arm first
