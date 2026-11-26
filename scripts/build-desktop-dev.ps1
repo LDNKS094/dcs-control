@@ -1,12 +1,16 @@
 #Requires -Version 7
 # A local test build, without release packaging or game deployment.
-param([string]$Output, [string]$OptiScalerNrRevision)
+param([string]$Output, [switch]$IncludeVdxr)
 $ErrorActionPreference = 'Stop'
 $workspaceRoot = Split-Path -Parent $PSScriptRoot
 if (-not $Output) { $Output = Join-Path $workspaceRoot 'artifacts/desktop-dev' }
 & dotnet publish (Join-Path $workspaceRoot 'src/DcsVr.App/DcsVr.App.csproj') -c Release -r win-x64 --self-contained false -p:DcsControlManualUpdates=true -o $Output --nologo
 if ($LASTEXITCODE -ne 0) { throw 'Desktop development app build failed.' }
-& (Join-Path $PSScriptRoot 'build-optiscaler-nr.ps1') -DistributionRoot $Output -Revision $OptiScalerNrRevision
+if ($IncludeVdxr) {
+    & (Join-Path $PSScriptRoot 'build-render-backends.ps1') -DistributionRoot $Output
+} else {
+    & (Join-Path $PSScriptRoot 'build-optiscaler-nr.ps1') -DistributionRoot $Output
+}
 
 # Engine Optimizations is independent of the screen backend. Reuse the local native build.
 $engineRoot = Join-Path $Output 'components/dcsqvcull'

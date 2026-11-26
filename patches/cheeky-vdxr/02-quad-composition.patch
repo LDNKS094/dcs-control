@@ -1,0 +1,2190 @@
+diff --git a/openxr_layer/quad_capture.hpp b/openxr_layer/quad_capture.hpp
+index 0053fc9..1a02bed 100644
+--- a/openxr_layer/quad_capture.hpp
++++ b/openxr_layer/quad_capture.hpp
+@@ -6,16 +6,21 @@
+ #include <d3d12.h>
+ #include <d3d11_4.h>
+ #include <d3dcompiler.h>
++#include <DirectXMath.h>
+ #include <wrl/client.h>
+ #include <array>
+ #include <algorithm>
+ #include <cmath>
+ #include <cstring>
++#include <filesystem>
+ #include <vector>
+ #include <memory>
+ #include <functional>
+ #include "quad_role_mapping.hpp"
+ #include "quad_fg.hpp"
++#include "../shared/quad_blend_shader.hpp"
++#include "quad_color_match11.hpp"
++#include "quad_head_focus.hpp"
+ 
+ namespace cheeky::quad_capture {
+ using Microsoft::WRL::ComPtr;
+@@ -23,13 +28,128 @@ inline std::recursive_mutex d3d11_dispatch_mutex;
+ constexpr auto configuration = XR_VIEW_CONFIGURATION_TYPE_PRIMARY_QUAD_VARJO;
+ inline bool is_quad(XrViewConfigurationType type) { return type == configuration; }
+ 
+-inline XrFovf inset_fov(const XrFovf& outer) {
++inline XrFovf inset_fov(const XrFovf& outer, const QuadFocusSettings& settings = {}, FocusShift shift = {}) {
+     const float l=std::tan(outer.angleLeft),r=std::tan(outer.angleRight);
+     const float d=std::tan(outer.angleDown),u=std::tan(outer.angleUp);
+-    const float w=(r-l)*.5f,h=(u-d)*.5f;
+-    const float x=std::clamp(-w*.5f,l,r-w),y=std::clamp(-h*.5f,d,u-h);
+-    return {std::atan(x),std::atan(x+w),std::atan(y+h),std::atan(y)};
++    const float w=(r-l)*(.01f*settings.width),h=(u-d)*(.01f*settings.height);
++    const float x=settings.width==100?l:std::clamp(std::clamp(-w*.5f,l,r-w)+shift[0],l,r-w);
++    const float y=settings.height==100?d:std::clamp(std::clamp(-h*.5f,d,u-h)+shift[1],d,u-h);
++    return {settings.width==100?outer.angleLeft:std::atan(x),settings.width==100?outer.angleRight:std::atan(x+w),
++        settings.height==100?outer.angleUp:std::atan(y+h),settings.height==100?outer.angleDown:std::atan(y)};
+ }
++inline FocusShift fit_focus_shift(const std::array<XrView,2>& views,
++    const QuadFocusSettings& settings,FocusShift degrees) {
++    FocusShift minimum{-1e6f,-1e6f}, maximum{1e6f,1e6f};
++    for (const auto& view:views) {
++        const auto base=inset_fov(view.fov,settings);
++        minimum[0]=std::max(minimum[0],std::tan(view.fov.angleLeft)-std::tan(base.angleLeft));
++        minimum[1]=std::max(minimum[1],std::tan(view.fov.angleDown)-std::tan(base.angleDown));
++        maximum[0]=std::min(maximum[0],std::tan(view.fov.angleRight)-std::tan(base.angleRight));
++        maximum[1]=std::min(maximum[1],std::tan(view.fov.angleUp)-std::tan(base.angleUp));
++    }
++    constexpr float radians=std::numbers::pi_v<float>/180.f;
++    // Clamp before tan so a large turn still reaches the same viewport edge.
++    for (unsigned axis=0;axis<2;++axis) {
++        const float low=std::atan(std::min(minimum[axis],0.f));
++        const float high=std::atan(std::max(maximum[axis],0.f));
++        degrees[axis]=std::tan(std::clamp(degrees[axis]*radians,low,high));
++    }
++    return degrees;
++}
++
++struct LocatedFocus {
++    std::array<XrFovf,2> eyes;
++    QuadFocusSettings settings;
++    FocusShift shift;
++    std::array<std::array<float,2>,2> sizes;
++};
++
++inline void locate_focus(LocatedFocus& focus,const std::array<XrView,2>& views) {
++    const auto& settings=focus.settings;
++    const FocusShift size{settings.width*.01f,settings.height*.01f};
++    focus.sizes={size,size};
++    const auto& leftPose=views[0].pose;
++    const auto& rightPose=views[1].pose;
++    const auto& q=leftPose.orientation;
++    const auto& r=rightPose.orientation;
++    const float alignment=std::abs(q.x*r.x+q.y*r.y+q.z*r.z+q.w*r.w);
++    if(settings.match_stereo_borders&&alignment>=1.f-1e-6f) {
++        using namespace DirectX;
++        const auto& lpos=leftPose.position;
++        const auto& rpos=rightPose.position;
++        XMFLOAT3 halfBaseline;
++        XMStoreFloat3(&halfBaseline,XMVector3InverseRotate(
++            XMVectorSet((rpos.x-lpos.x)*.5f,(rpos.y-lpos.y)*.5f,(rpos.z-lpos.z)*.5f,0.f),
++            XMVectorSet(q.x,q.y,q.z,q.w)));
++        const float stereo_focus_distance=settings.stereo_distance_m;
++        // Parallel eye projections map to rectangles on the same depth plane.
++        const std::array<FocusShift,2> origins{{{-halfBaseline.x,-halfBaseline.y},{halfBaseline.x,halfBaseline.y}}};
++        const std::array distances{stereo_focus_distance-halfBaseline.z,stereo_focus_distance+halfBaseline.z};
++        const auto bounds=[&](const XrFovf& fov,unsigned eye) {
++            const auto& o=origins[eye];
++            const float depth=distances[eye];
++            return std::array{o[0]+depth*std::tan(fov.angleLeft),o[1]+depth*std::tan(fov.angleDown),
++                o[0]+depth*std::tan(fov.angleRight),o[1]+depth*std::tan(fov.angleUp)};
++        };
++        const auto left=bounds(views[0].fov,0),right=bounds(views[1].fov,1);
++        const FocusShift lo{std::max(left[0],right[0]),std::max(left[1],right[1])};
++        const FocusShift hi{std::min(left[2],right[2]),std::min(left[3],right[3])};
++        if(hi[0]>lo[0]&&hi[1]>lo[1]) {
++            const auto leftFocus=bounds(inset_fov(views[0].fov,settings),0);
++            const auto rightFocus=bounds(inset_fov(views[1].fov,settings),1);
++            // Cover both original insets with one rectangle that fits both views.
++            std::array<float,4> shared{};
++            for(unsigned axis=0;axis<2;++axis) {
++                const float leftSpan=left[axis+2]-left[axis],rightSpan=right[axis+2]-right[axis];
++                const float first=std::min(leftFocus[axis],rightFocus[axis]);
++                const float last=std::max(leftFocus[axis+2],rightFocus[axis+2]);
++                const float span=std::min(hi[axis]-lo[axis],last-first);
++                // Keep subpixel pose noise out of the moving FG atlas size and history key.
++                focus.sizes[0][axis]=std::round(span/leftSpan*4096.f)/4096.f;
++                focus.sizes[1][axis]=std::round(span/rightSpan*4096.f)/4096.f;
++                const float limit=std::max(lo[axis],hi[axis]-span);
++                const float base=std::clamp(first,lo[axis],limit);
++                const float degrees=focus.shift[axis]*std::numbers::pi_v<float>/180.f;
++                const float offset=stereo_focus_distance*std::tan(std::clamp(degrees,
++                    std::atan((lo[axis]-base)/stereo_focus_distance),std::atan((limit-base)/stereo_focus_distance)));
++                const float start=std::clamp(base+offset,lo[axis],limit);
++                shared[axis]=start;
++                shared[axis+2]=start+span;
++            }
++            for(unsigned eye=0;eye<2;++eye) {
++                const auto& o=origins[eye];
++                const auto angle=[&](unsigned edge) {return std::atan((shared[edge]-o[edge%2])/distances[eye]);};
++                focus.eyes[eye]={angle(0),angle(2),angle(3),angle(1)};
++            }
++            return;
++        }
++    }
++    const auto shift=settings.head_offset?fit_focus_shift(views,settings,focus.shift):FocusShift{};
++    for(unsigned eye=0;eye<2;++eye)focus.eyes[eye]=inset_fov(views[eye].fov,settings,shift);
++}
++
++inline CheekyQuadFocusOptions current_focus() noexcept {
++    const auto runtime=GetModuleHandleW(L"CheekyFoveatedDLSSRuntime.dll");
++    const auto query=runtime?reinterpret_cast<CheekyQuadFocusOptionsFn>(GetProcAddress(runtime,"CheekyQuad_GetFocusOptionsV1")):nullptr;
++    CheekyQuadFocusOptions options;
++    if(query) query(&options);
++    return options;
++}
++
++inline std::array<std::uint32_t,2> initial_focus_render_percent() {
++    const auto defaults=current_focus().settings;
++    wchar_t executable[MAX_PATH]{};
++    const auto length=GetModuleFileNameW(nullptr,executable,MAX_PATH);
++    if(!length||length>=MAX_PATH)return {defaults.width,defaults.height};
++    // DCS can enumerate view extents before the standalone host loads the runtime.
++    const auto config=std::filesystem::path(executable).parent_path()/L"CheekyFoveatedDLSS"/L"CheekyFoveatedDLSS.ini";
++    const auto percent=[&](const wchar_t* key,std::uint32_t fallback) {
++        const auto value=GetPrivateProfileIntW(L"CheekyFoveatedDLSS",key,fallback,config.c_str());
++        return static_cast<std::uint32_t>(std::clamp(static_cast<int>(value),25,100));
++    };
++    return {percent(L"QuadFocusWidth",defaults.width),percent(L"QuadFocusHeight",defaults.height)};
++}
++
+ inline std::array<float,4> inset_rect(const XrFovf& outer,const XrFovf& inner) {
+     const float l=std::tan(outer.angleLeft),r=std::tan(outer.angleRight);
+     const float d=std::tan(outer.angleDown),u=std::tan(outer.angleUp);
+@@ -59,22 +179,33 @@ struct Input {
+             uint64_t(r.offset.x)+r.extent.width<=desc.Width&&uint64_t(r.offset.y)+r.extent.height<=desc.Height;
+     }
+ };
+-inline constexpr char shader_source[]=R"HLSL(
++inline constexpr char shader_source[]=CHEEKY_QUAD_BLEND_HLSL R"HLSL(
+ Texture2DArray<float4> Context:register(t0);Texture2DArray<float4> Focus:register(t1);
+ SamplerState Linear:register(s0);
+-cbuffer Params:register(b0){float4 ContextUV;float4 FocusUV;float4 Inset;float2 Feather;float2 Pad;};
++cbuffer Params:register(b0){float4 ContextUV;float4 FocusUV;float4 Inset;float4 Blend;};
+ struct V{float4 p:SV_Position;float2 uv:TEXCOORD0;};
+ V VS(uint id:SV_VertexID){V v;v.uv=float2((id<<1)&2,id&2);v.p=float4(v.uv*float2(2,-2)+float2(-1,1),0,1);return v;}
+ float4 PS(V v):SV_Target{
+  float4 c=Context.SampleLevel(Linear,float3(ContextUV.xy+v.uv*ContextUV.zw,0),0);
+  float2 f=(v.uv-Inset.xy)/Inset.zw;
+- float2 edge=min(f,1-f)*Inset.zw;
+- float blend=saturate(min(edge.x/Feather.x,edge.y/Feather.y));
++ float blend=quadFocusWeight(f,Inset.zw,Blend);
+  float4 center=Focus.SampleLevel(Linear,float3(FocusUV.xy+saturate(f)*FocusUV.zw,0),0);
+  return lerp(c,center,blend);
+-})HLSL";
++}
++float4 PSUI(V v):SV_Target{
++ float4 c=Context.SampleLevel(Linear,float3(ContextUV.xy+v.uv*ContextUV.zw,0),0);
++ float2 f=(v.uv-Inset.xy)/Inset.zw;
++ float blend=quadFocusWeight(f,Inset.zw,Blend);
++ float4 center=Focus.SampleLevel(Linear,float3(FocusUV.xy+saturate(f)*FocusUV.zw,0),0);
++ float alpha=lerp(c.a,center.a,blend);
++ float3 premult=lerp(c.rgb*c.a,center.rgb*center.a,blend);
++ return float4(alpha>0?premult/alpha:float3(0,0,0),alpha);
++}
++)HLSL";
+ 
+ struct Compositor11 {
++    QuadFocusSettings focus_settings;
++    QuadColorMatch11 color_match;
+     struct Eye {
+         XrSwapchain chain{};unsigned width{},height{};DXGI_FORMAT format{DXGI_FORMAT_UNKNOWN};
+         std::vector<XrSwapchainImageD3D11KHR> images;
+@@ -94,16 +225,30 @@ struct Compositor11 {
+     ComPtr<ID3D11DepthStencilState> depth;
+     std::unique_ptr<RoleMapping11> mapping;
+     std::unique_ptr<QuadFg11> fg_guides;
++    bool precompose{true}; // Latched with the session's compositor resources.
+     std::shared_ptr<cheeky::fg::D3D11Bridge> fg_bridge;
+     std::array<XrSwapchain,4> source_chains{};
+     std::vector<ComPtr<IUnknown>> recorded_views; // Alive until the command list has executed.
+     // Invoked while the composite output is still acquired, before release.
+     std::function<void(unsigned,XrSwapchain,unsigned,ID3D11Texture2D*,unsigned,unsigned,DXGI_FORMAT)> capture_output;
++    struct ComposedSlot {
++        std::array<ComPtr<ID3D11Texture2D>,2> color;
++        std::array<ComPtr<ID3D12Resource>,2> color12;
++    };
++    // The FG owner leases private shared outputs; runtime images remain a
++    // separate presentation destination and are never borrowed after release.
++    std::function<bool(unsigned,XrSwapchain,const std::shared_ptr<ComposedSlot>&)> capture_shared_output;
++    std::vector<std::shared_ptr<ComposedSlot>> composed_frames;
++    std::size_t composed_capacity{};
+     std::array<Eye,2> eyes;
+     std::array<XrViewConfigurationView,2> recommended{};
+     bool initialize() {
+         if(vs)return true;
+         if(!device||!create||!destroy||!enumerate_images||!acquire||!wait||!release)return false;
++        const auto runtime=GetModuleHandleW(L"CheekyFoveatedDLSSRuntime.dll");
++        const auto query=runtime?reinterpret_cast<CheekyQuadPrecomposeOptionsFn>(GetProcAddress(runtime,"CheekyQuad_GetPrecomposeV1")):nullptr;
++        CheekyQuadPrecomposeOptions options;
++        if(query&&query(&options))precompose=options.enabled!=0;
+         if(!mapping)mapping=std::make_unique<RoleMapping11>(device.Get());
+         if(!fg_guides)fg_guides=std::make_unique<QuadFg11>(device.Get());
+         device->GetImmediateContext(&immediate);
+@@ -126,7 +271,9 @@ struct Compositor11 {
+             SUCCEEDED(device->CreateDepthStencilState(&ds,&depth))&&
+             SUCCEEDED(device->CreateVertexShader(vertex->GetBufferPointer(),vertex->GetBufferSize(),nullptr,&vs));
+     }
+-    ~Compositor11(){for(auto& eye:eyes)if(eye.chain&&destroy)destroy(eye.chain);}
++    ~Compositor11(){
++        for(auto& eye:eyes)if(eye.chain&&destroy)destroy(eye.chain);
++    }
+     bool output(unsigned eye,DXGI_FORMAT format) {
+         auto& e=eyes[eye];if(e.chain)return e.format==format&&!e.images.empty();
+         e.width=recommended[eye].recommendedImageRectWidth;e.height=recommended[eye].recommendedImageRectHeight;e.format=format;
+@@ -147,11 +294,15 @@ struct Compositor11 {
+             r.offset.x>=0&&r.offset.y>=0&&r.extent.width>0&&r.extent.height>0&&
+             uint64_t(r.offset.x)+r.extent.width<=desc.Width&&uint64_t(r.offset.y)+r.extent.height<=desc.Height;
+     }
+-    bool record(unsigned eye,const Input& context,const Input& focus,const XrFovf& outer,const XrFovf& inner,ID3D11Texture2D* target) {
++    struct DrawInput {
++        std::array<float,16> params{};
++        std::array<ComPtr<ID3D11ShaderResourceView>,2> sources;
++    };
++    bool prepare_draw(unsigned eye,const Input& context,const Input& focus,const XrFovf& outer,const XrFovf& inner,DrawInput& draw) {
+         const auto inset=inset_rect(outer,inner);
+         for(float f:inset)if(!std::isfinite(f))return false;
+-        if(!target||inset[0]<-.001f||inset[1]<-.001f||inset[2]<=0||inset[3]<=0||inset[0]+inset[2]>1.001f||inset[1]+inset[3]>1.001f)return false;
+-        float params[16]{};std::array<ComPtr<ID3D11ShaderResourceView>,2> sources;
++        if(inset[0]<-.001f||inset[1]<-.001f||inset[2]<=0||inset[3]<=0||inset[0]+inset[2]>1.001f||inset[1]+inset[3]>1.001f)return false;
++        auto* params=draw.params.data();
+         const Input* inputs[]{&context,&focus};
+         for(unsigned i=0;i<2;++i){
+             const auto& input=*inputs[i];D3D11_TEXTURE2D_DESC desc{};input.texture11->GetDesc(&desc);const auto& r=input.image.imageRect;
+@@ -159,35 +310,86 @@ struct Compositor11 {
+             params[i*4+2]=float(r.extent.width)/desc.Width;params[i*4+3]=float(r.extent.height)/desc.Height;
+             D3D11_SHADER_RESOURCE_VIEW_DESC srv{};srv.Format=input.format;srv.ViewDimension=D3D11_SRV_DIMENSION_TEXTURE2DARRAY;
+             srv.Texture2DArray.MipLevels=1;srv.Texture2DArray.FirstArraySlice=input.image.imageArrayIndex;srv.Texture2DArray.ArraySize=1;
+-            if(FAILED(device->CreateShaderResourceView(input.texture11,&srv,&sources[i])))return false;
++            if(FAILED(device->CreateShaderResourceView(input.texture11,&srv,&draw.sources[i])))return false;
+         }
+-        std::copy(inset.begin(),inset.end(),params+8);params[12]=2.f/eyes[eye].width;params[13]=2.f/eyes[eye].height;
++        std::copy(inset.begin(),inset.end(),params+8);
++        const auto blend=quad_focus_blend(focus_settings,inset,eyes[eye].width,eyes[eye].height);
++        std::copy(blend.begin(),blend.end(),params+12);
++        return true;
++    }
++    bool record_draw(unsigned eye,const DrawInput& draw,ID3D11Texture2D* target,
++        ID3D11PixelShader* capture_shader=nullptr,DXGI_FORMAT capture_format=DXGI_FORMAT_UNKNOWN) {
++        if(!target)return false;
+         ComPtr<ID3D11RenderTargetView> target_view;D3D11_RENDER_TARGET_VIEW_DESC rtv{};
+-        rtv.Format=eyes[eye].format;rtv.ViewDimension=D3D11_RTV_DIMENSION_TEXTURE2D;
++        rtv.Format=capture_format==DXGI_FORMAT_UNKNOWN?eyes[eye].format:capture_format;rtv.ViewDimension=D3D11_RTV_DIMENSION_TEXTURE2D;
+         if(FAILED(device->CreateRenderTargetView(target,&rtv,&target_view)))return false;
+         // The recorded draw references these views until ExecuteCommandList.
+         // Never let them die when they are unbound at the end of recording.
++        const auto& sources=draw.sources;
+         recorded_views.insert(recorded_views.end(),{sources[0],sources[1],target_view});
+-        deferred->UpdateSubresource(constants.Get(),0,nullptr,params,0,0);
++        deferred->UpdateSubresource(constants.Get(),0,nullptr,draw.params.data(),0,0);
+         deferred->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+-        deferred->VSSetShader(vs.Get(),nullptr,0);deferred->PSSetShader(ps.Get(),nullptr,0);
++        const bool match=!capture_shader&&focus_settings.color_match;
++        deferred->VSSetShader(vs.Get(),nullptr,0);
++        auto* pixel=ps.Get();
++        if(capture_shader)pixel=capture_shader;
++        else if(match)pixel=color_match.apply.Get();
++        deferred->PSSetShader(pixel,nullptr,0);
+         auto* buffer=constants.Get();deferred->PSSetConstantBuffers(0,1,&buffer);
+         auto* sample=sampler.Get();deferred->PSSetSamplers(0,1,&sample);
+-        ID3D11ShaderResourceView* srvs[]{sources[0].Get(),sources[1].Get()};deferred->PSSetShaderResources(0,2,srvs);
++        ID3D11ShaderResourceView* srvs[]{sources[0].Get(),sources[1].Get()};
++        deferred->PSSetShaderResources(0,2,srvs);
++        if(match)color_match.bind(deferred.Get(),eye);
+         auto* target_raw=target_view.Get();deferred->OMSetRenderTargets(1,&target_raw,nullptr);
+         deferred->OMSetDepthStencilState(depth.Get(),0);
+         deferred->RSSetState(raster.Get());D3D11_VIEWPORT viewport{0,0,float(eyes[eye].width),float(eyes[eye].height),0,1};
+         deferred->RSSetViewports(1,&viewport);deferred->Draw(3,0);
+-        ID3D11ShaderResourceView* empty[2]{};deferred->PSSetShaderResources(0,2,empty);deferred->OMSetRenderTargets(0,nullptr,nullptr);
++        ID3D11ShaderResourceView* empty[2]{};deferred->PSSetShaderResources(0,2,empty);
++        if(match){
++            deferred->PSSetShaderResources(5,1,empty);
++            deferred->PSSetShaderResources(7,1,empty);
++        }
++        deferred->OMSetRenderTargets(0,nullptr,nullptr);
+         return true;
+     }
++    bool record(unsigned eye,const Input& context,const Input& focus,const XrFovf& outer,const XrFovf& inner,ID3D11Texture2D* target,
++        ID3D11PixelShader* capture_shader=nullptr,DXGI_FORMAT capture_format=DXGI_FORMAT_UNKNOWN) {
++        DrawInput draw;
++        return prepare_draw(eye,context,focus,outer,inner,draw)&&record_draw(eye,draw,target,capture_shader,capture_format);
++    }
+     XrResult compose(const std::array<Input,4>& inputs,const XrCompositionLayerProjection& projection,std::array<XrCompositionLayerProjectionView,2>& views) {
+         std::lock_guard dispatch(d3d11_dispatch_mutex);
+         if(!initialize())return XR_ERROR_RUNTIME_FAILURE;
+         for(const auto& input:inputs)if(!valid(input))return XR_ERROR_VALIDATION_FAILURE;
+         if(!output(0,inputs[0].format)||!output(1,inputs[1].format))return XR_ERROR_RUNTIME_FAILURE;
++        std::array<DrawInput,2> draws;
++        for(unsigned eye=0;eye<2;++eye)
++            if(!prepare_draw(eye,inputs[eye],inputs[eye+2],projection.views[eye].fov,projection.views[eye+2].fov,draws[eye]))
++                return XR_ERROR_VALIDATION_FAILURE;
++        if(focus_settings.color_match&&!color_match.initialize(device.Get()))return XR_ERROR_RUNTIME_FAILURE;
++        std::shared_ptr<ComposedSlot> shared_frame;
++        if(capture_shared_output&&fg_bridge){
++            for(auto& slot:composed_frames)if(slot.use_count()==1){shared_frame=slot;break;}
++            if(!shared_frame){
++                if(composed_frames.size()<composed_capacity){shared_frame=std::make_shared<ComposedSlot>();composed_frames.push_back(shared_frame);}
++            }
++            for(unsigned eye=0;shared_frame&&eye<2;++eye){
++                auto& texture=shared_frame->color[eye];auto& alias=shared_frame->color12[eye];
++                D3D11_TEXTURE2D_DESC old{};if(texture)texture->GetDesc(&old);
++                ComPtr<ID3D12Device> device12;if(alias)alias->GetDevice(IID_PPV_ARGS(&device12));
++                if(old.Width!=eyes[eye].width||old.Height!=eyes[eye].height||old.Format!=eyes[eye].format||device12.Get()!=fg_bridge->device12.Get()){
++                    D3D11_TEXTURE2D_DESC desc{};desc.Width=eyes[eye].width;desc.Height=eyes[eye].height;desc.Format=eyes[eye].format;
++                    desc.ArraySize=desc.MipLevels=desc.SampleDesc.Count=1;
++                    cheeky::fg::D3D11Bridge::Image allocation;
++                    if(!fg_bridge->image11(desc,allocation))return XR_ERROR_RUNTIME_FAILURE;
++                    texture=std::move(allocation.shared11);alias=std::move(allocation.shared12);
++                }
++            }
++        }
+         struct ContextLock {ID3D11Multithread* value;ContextLock(ID3D11Multithread* v):value(v){value->Enter();}~ContextLock(){value->Leave();}};
+         XrResult result=XR_SUCCESS;
++        if(focus_settings.color_match)color_match.record(deferred.Get(),constants.Get(),sampler.Get(),draws);
++        else color_match.reset_history();
+         for(unsigned eye=0;eye<2;++eye){
+             auto& e=eyes[eye];
+             if(!e.acquired){XrSwapchainImageAcquireInfo a{XR_TYPE_SWAPCHAIN_IMAGE_ACQUIRE_INFO};result=acquire(e.chain,&a,&e.index);
+@@ -197,8 +399,11 @@ struct Compositor11 {
+                 // A timeout is not a successful EndFrame: no runtime frame has
+                 // been ended yet. Retain this acquisition for a later retry.
+                 if(result!=XR_SUCCESS){if(XR_SUCCEEDED(result))result=XR_ERROR_RUNTIME_FAILURE;break;}e.waited=true;}
+-            if(e.index>=e.images.size()||!record(eye,inputs[eye],inputs[eye+2],projection.views[eye].fov,projection.views[eye+2].fov,e.images[e.index].texture)){
++            if(e.index>=e.images.size()||!record_draw(eye,draws[eye],shared_frame?shared_frame->color[eye].Get():e.images[e.index].texture)){
+                 result=XR_ERROR_VALIDATION_FAILURE;break;}
++            // Keep the native fallback identical. FG reads the shared draw
++            // target directly instead of capturing this runtime copy again.
++            if(shared_frame)deferred->CopyResource(e.images[e.index].texture,shared_frame->color[eye].Get());
+         }
+         ComPtr<ID3D11CommandList> commands;
+         // Finish even on failure to discard partial recording and reset private state.
+@@ -208,18 +413,24 @@ struct Compositor11 {
+             else {ContextLock lock(multithread.Get());immediate->ExecuteCommandList(commands.Get(),TRUE);immediate->Flush();
+                 if(FAILED(device->GetDeviceRemovedReason()))result=XR_ERROR_RUNTIME_FAILURE;}
+         }
++        // Keep the bridge's mutex -> immediate-context lock order. The outer
++        // dispatch lock still excludes interleaved game/bridge submissions.
++        if(result==XR_SUCCESS&&shared_frame){std::lock_guard bridge_lock(fg_bridge->mutex);if(!fg_bridge->from11())result=XR_ERROR_RUNTIME_FAILURE;}
+         commands.Reset();recorded_views.clear();
+         for(unsigned eye=0;eye<2;++eye)if(eyes[eye].waited){
++            if(result==XR_SUCCESS&&shared_frame)capture_shared_output(eye,eyes[eye].chain,shared_frame);
+             if(result==XR_SUCCESS&&capture_output)capture_output(eye,eyes[eye].chain,eyes[eye].index,eyes[eye].images[eyes[eye].index].texture,
+                 eyes[eye].width,eyes[eye].height,eyes[eye].format);
+             auto& e=eyes[eye];XrSwapchainImageReleaseInfo r{XR_TYPE_SWAPCHAIN_IMAGE_RELEASE_INFO};const auto released=release(e.chain,&r);
+             if(XR_FAILED(released))result=released;else e.acquired=e.waited=false;
+             views[eye]=projection.views[eye];views[eye].next=nullptr;views[eye].subImage={eyes[eye].chain,{{0,0},{int32_t(eyes[eye].width),int32_t(eyes[eye].height)}},0};
+         }
++        if(result!=XR_SUCCESS)color_match.reset_history();
+         return result;
+     }
+ };
+ struct Compositor {
++    QuadFocusSettings focus_settings;
+     struct Eye {
+         XrSwapchain chain{};unsigned width{},height{};DXGI_FORMAT format{DXGI_FORMAT_UNKNOWN};
+         std::vector<XrSwapchainImageD3D12KHR> images;
+@@ -333,7 +544,9 @@ struct Compositor {
+             srv.Shader4ComponentMapping=D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;srv.Texture2DArray.MipLevels=1;
+             srv.Texture2DArray.FirstArraySlice=input.image.imageArrayIndex;srv.Texture2DArray.ArraySize=1;device->CreateShaderResourceView(input.texture,&srv,handle);
+         }
+-        std::copy(inset.begin(),inset.end(),constants+8);constants[12]=2.f/eyes[eye].width;constants[13]=2.f/eyes[eye].height;
++        std::copy(inset.begin(),inset.end(),constants+8);
++        const auto blend=quad_focus_blend(focus_settings,inset,eyes[eye].width,eyes[eye].height);
++        std::copy(blend.begin(),blend.end(),constants+12);
+         const bool same=context.texture==focus.texture&&context.image.imageArrayIndex==focus.image.imageArrayIndex;
+         barrier(list.Get(),context,true);if(!same)barrier(list.Get(),focus,true);
+         auto rtv=rtvs->GetCPUDescriptorHandleForHeapStart();rtv.ptr+=eye*device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_RTV);
+@@ -346,7 +559,11 @@ struct Compositor {
+         barrier(list.Get(),context,false);if(!same)barrier(list.Get(),focus,false);return true;
+     }
+     XrResult compose(const std::array<Input,4>& inputs,const XrCompositionLayerProjection& projection,std::array<XrCompositionLayerProjectionView,2>& views) {
+-        if(device11)return initialize()?d3d11->compose(inputs,projection,views):XR_ERROR_RUNTIME_FAILURE;
++        if(device11){
++            if(!initialize())return XR_ERROR_RUNTIME_FAILURE;
++            d3d11->focus_settings=focus_settings;
++            return d3d11->compose(inputs,projection,views);
++        }
+         if(!initialize())return XR_ERROR_RUNTIME_FAILURE;
+         recording=(recording+1)%recordings.size();auto& current=recordings[recording];
+         if(!(wait_gpu?idle():wait_for(current.serial)))return XR_ERROR_RUNTIME_FAILURE;
+diff --git a/openxr_layer/quad_capture.inl b/openxr_layer/quad_capture.inl
+index 9100d6e..e17a15e 100644
+--- a/openxr_layer/quad_capture.inl
++++ b/openxr_layer/quad_capture.inl
+@@ -70,6 +70,7 @@ XRAPI_ATTR XrResult XRAPI_CALL cheeky_xrEnumerateViewConfigurations(XrInstance i
+ XRAPI_ATTR XrResult XRAPI_CALL cheeky_xrEnumerateViewConfigurationViews(XrInstance instance,XrSystemId system,
+     XrViewConfigurationType type,uint32_t capacity,uint32_t* count,XrViewConfigurationView* output) {
+     Dispatch dispatch;bool enabled{};
++    std::array<std::uint32_t,2> focusPercent{};
+     const auto finish=[&](XrResult result){
+         const bool count_valid=count&&(XR_SUCCEEDED(result)||result==XR_ERROR_SIZE_INSUFFICIENT);
+         log_startup("QUAD-CAPTURE enumerate_views instance=%p system=%llu configuration=%d capacity=%u result=%d count_valid=%u count=%u provider=%u\n",
+@@ -81,7 +82,7 @@ XRAPI_ATTR XrResult XRAPI_CALL cheeky_xrEnumerateViewConfigurationViews(XrInstan
+         return result;
+     };
+     {std::lock_guard lock(state_mutex);auto it=instances.find(instance);if(it==instances.end())return finish(XR_ERROR_HANDLE_INVALID);
+-        dispatch=it->second.dispatch;enabled=it->second.quad_capture_enabled;}
++        dispatch=it->second.dispatch;enabled=it->second.quad_capture_enabled;focusPercent=it->second.quad_focus_render_percent;}
+     if(!dispatch.enumerate_view_configuration_views)return finish(XR_ERROR_FUNCTION_UNSUPPORTED);
+     if(!enabled||!cheeky::quad_capture::is_quad(type))return finish(dispatch.enumerate_view_configuration_views(instance,system,type,capacity,count,output));
+     if(!count||(capacity&&!output))return finish(XR_ERROR_VALIDATION_FAILURE);
+@@ -89,12 +90,25 @@ XRAPI_ATTR XrResult XRAPI_CALL cheeky_xrEnumerateViewConfigurationViews(XrInstan
+     std::array<XrViewConfigurationView,2> stereo{{{XR_TYPE_VIEW_CONFIGURATION_VIEW},{XR_TYPE_VIEW_CONFIGURATION_VIEW}}};uint32_t n{};
+     const auto result=dispatch.enumerate_view_configuration_views(instance,system,XR_VIEW_CONFIGURATION_TYPE_PRIMARY_STEREO,2,&n,stereo.data());
+     if(XR_FAILED(result))return finish(result);if(n!=2)return finish(XR_ERROR_VIEW_CONFIGURATION_TYPE_UNSUPPORTED);
++    if(!focusPercent[0]) {
++        const auto initial=cheeky::quad_capture::initial_focus_render_percent();
++        std::lock_guard lock(state_mutex);
++        auto it=instances.find(instance);if(it==instances.end())return finish(XR_ERROR_HANDLE_INVALID);
++        auto& saved=it->second.quad_focus_render_percent;
++        // A live FOV edit can reuse the game's swapchains. Keep their recommended extent fixed until restart.
++        if(!saved[0])saved=initial;
++        focusPercent=saved;
++    }
++    const auto scaled=[](std::uint32_t extent,std::uint32_t percent) {
++        return (std::max)(1u,static_cast<std::uint32_t>(std::uint64_t(extent)*percent/100u));
++    };
+     for(unsigned i=0;i<4;++i){
+         if(output[i].type!=XR_TYPE_VIEW_CONFIGURATION_VIEW)return finish(XR_ERROR_VALIDATION_FAILURE);
+         // No quad-view configuration extension is advertised by this fixed provider.
+         if(output[i].next)return finish(XR_ERROR_VALIDATION_FAILURE);
+-        output[i]=stereo[i%2];output[i].recommendedImageRectWidth=(std::max)(1u,output[i].recommendedImageRectWidth/2);
+-        output[i].recommendedImageRectHeight=(std::max)(1u,output[i].recommendedImageRectHeight/2);
++        output[i]=stereo[i%2];
++        output[i].recommendedImageRectWidth=scaled(output[i].recommendedImageRectWidth,i<2?50u:focusPercent[0]);
++        output[i].recommendedImageRectHeight=scaled(output[i].recommendedImageRectHeight,i<2?50u:focusPercent[1]);
+         output[i].recommendedSwapchainSampleCount=output[i].maxSwapchainSampleCount=1;
+         log_startup("QUAD-CAPTURE recommended view=%u role=%s eye=%u size=%ux%u\n",i,i<2?"peripheral":"focus",i%2,
+             output[i].recommendedImageRectWidth,output[i].recommendedImageRectHeight);
+@@ -157,18 +171,34 @@ XrResult quad_capture_locate(XrSession session,const XrViewLocateInfo* info,XrVi
+     std::array<XrView,2> stereo{{{XR_TYPE_VIEW},{XR_TYPE_VIEW}}};uint32_t n{};
+     const auto result=next(session,&forwarded,state,2,&n,stereo.data());if(XR_FAILED(result))return result;
+     if(n!=2)return XR_ERROR_RUNTIME_FAILURE;
+-    for(unsigned i=0;i<4;++i){views[i].pose=stereo[i%2].pose;views[i].fov=i<2?stereo[i].fov:cheeky::quad_capture::inset_fov(stereo[i%2].fov);}
++    const auto options=cheeky::quad_capture::current_focus();
++    cheeky::quad_capture::LocatedFocus focus{{},options.settings,{},{}};
+     bool diagnostic{};
+     {std::lock_guard lock(state_mutex);auto it=sessions.find(session);if(it!=sessions.end()){
+-        diagnostic=++it->second.quad_capture_locates<=4;
+-        if(it->second.quad_capture_correct_focus_fov){
+-            // DCS has submitted outer FOVs for its focus views. Preserve the
+-            // exact located FOVs by display time, not just the latest query.
+-            auto& history=it->second.quad_capture_fovs;
+-            history[info->displayTime]={views[0].fov,views[1].fov,views[2].fov,views[3].fov};
+-            while(history.size()>32)history.erase(history.begin());
++        auto& owner=it->second;
++        diagnostic=++owner.quad_capture_locates<=4;
++        // Quad returns before the stereo locate path publishes its app frame.
++        if(owner.predicted_display_time!=info->displayTime){
++            owner.predicted_display_time=info->displayTime;
++            publish_snapshot_locked(&owner);
++        }
++        // Preserve the projection and blend together. A menu edit between
++        // LocateViews and EndFrame applies to the next located frame.
++        auto& history=owner.quad_capture_fovs;
++        const auto [sample,added]=history.try_emplace(info->displayTime,focus);
++        auto& located=sample->second;
++        if(added&&(state->viewStateFlags&XR_VIEW_STATE_ORIENTATION_VALID_BIT)){
++            located.shift=owner.quad_head_focus.update(stereo,*info,located.settings,options.reference_revision);
+         }
+-    }}
++        cheeky::quad_capture::locate_focus(located,stereo);
++        focus=located;
++        while(history.size()>32)history.erase(history.begin());
++    }else cheeky::quad_capture::locate_focus(focus,stereo);}
++    for(unsigned eye=0;eye<2;++eye){
++        views[eye].pose=views[eye+2].pose=stereo[eye].pose;
++        views[eye].fov=stereo[eye].fov;
++        views[eye+2].fov=focus.eyes[eye];
++    }
+     if(diagnostic)for(unsigned i=0;i<4;++i)log_startup("QUAD-CAPTURE locate view=%u role=%s eye=%u fov=%.6f,%.6f,%.6f,%.6f time=%lld\n",
+         i,i<2?"peripheral":"focus",i%2,views[i].fov.angleLeft,views[i].fov.angleRight,views[i].fov.angleUp,views[i].fov.angleDown,static_cast<long long>(info->displayTime));
+     return result;
+@@ -194,21 +224,26 @@ XrResult quad_capture_end(XrSession session,const XrFrameEndInfo* info,const Dis
+     std::copy_n(scene->views,4,corrected.begin());
+     auto projection=*scene;projection.views=corrected.data();
+     std::array<cheeky::quad_capture::Input,4> inputs{};bool diagnostic{};
++    std::array<std::array<float,2>,2> stable_sizes{};
+     {std::lock_guard lock(state_mutex);auto owner=sessions.find(session);if(owner==sessions.end())return XR_ERROR_HANDLE_INVALID;
+         diagnostic=++owner->second.quad_capture_frames<=8;
+-        if(owner->second.quad_capture_correct_focus_fov){
+-            auto& history=owner->second.quad_capture_fovs;const auto found=history.find(info->displayTime);
+-            if(found!=history.end()){
+-                corrected[2].fov=found->second[2];corrected[3].fov=found->second[3];
+-                // Keep the matching sample for multiple submissions at the same time.
+-                history.erase(history.begin(),found);
+-            }else{
+-                // This provider uses a fixed mathematical inset, so it can be
+-                // reconstructed from the submitted outer FOV without borrowing
+-                // another frame's sample. No synthetic eye tracking is involved.
+-                for(unsigned eye=0;eye<2;++eye)corrected[eye+2].fov=cheeky::quad_capture::inset_fov(corrected[eye].fov);
+-                if(diagnostic)log_startup("QUAD-CAPTURE focus FOV fixed fallback time=%lld\n",static_cast<long long>(info->displayTime));
++        auto& history=owner->second.quad_capture_fovs;const auto found=history.find(info->displayTime);
++        if(found!=history.end()){
++            compositor->focus_settings=found->second.settings;
++            if(found->second.settings.head_offset||found->second.settings.match_stereo_borders)
++                stable_sizes=found->second.sizes;
++            if(owner->second.quad_capture_correct_focus_fov){
++                corrected[2].fov=found->second.eyes[0];corrected[3].fov=found->second.eyes[1];
+             }
++            history.erase(history.begin(),found);
++        }else if(owner->second.quad_capture_correct_focus_fov&&!compositor->focus_settings.head_offset){
++            cheeky::quad_capture::LocatedFocus focus{{},compositor->focus_settings,{},{}};
++            const std::array<XrView,2> stereo{{{XR_TYPE_VIEW,nullptr,corrected[0].pose,corrected[0].fov},
++                {XR_TYPE_VIEW,nullptr,corrected[1].pose,corrected[1].fov}}};
++            cheeky::quad_capture::locate_focus(focus,stereo);
++            if(focus.settings.match_stereo_borders)stable_sizes=focus.sizes;
++            for(unsigned eye=0;eye<2;++eye)corrected[eye+2].fov=focus.eyes[eye];
++            if(diagnostic)log_startup("QUAD-CAPTURE focus FOV fallback time=%lld\n",static_cast<long long>(info->displayTime));
+         }
+         for(unsigned i=0;i<4;++i){
+             const auto& image=scene->views[i].subImage;auto chain=swapchains.find(image.swapchain);
+@@ -245,6 +280,30 @@ XrResult quad_capture_end(XrSession session,const XrFrameEndInfo* info,const Dis
+     layers[scene_index]=reinterpret_cast<const XrCompositionLayerBaseHeader*>(&replacement);
+     auto forwarded=*info;forwarded.layers=layers.data();
+     XrResult result=XR_SUCCESS;
++    // The raw-plane DX12 comparison has a separate rectangular FG compositor.
++    if(presenter&&presenter->interop11&&compositor->d3d11&&!compositor->d3d11->precompose){
++        compositor->focus_settings.custom_blend=false;
++        compositor->focus_settings.color_match=false;
++    }
++    std::array<unsigned,2> widths{},heights{};
++    std::array<std::array<float,4>,2> insets;
++    std::array<QuadFocusBlend,2> blends;
++    const auto& focus=compositor->focus_settings;
++    if(focus.head_offset&&stable_sizes[0][0]==0.f&&!focus.match_stereo_borders) {
++        const std::array size{focus.width*.01f,focus.height*.01f};
++        stable_sizes={size,size};
++    }
++    for(unsigned eye=0;eye<2;++eye){
++        widths[eye]=compositor->recommended[eye].recommendedImageRectWidth;
++        heights[eye]=compositor->recommended[eye].recommendedImageRectHeight;
++        insets[eye]=cheeky::quad_capture::inset_rect(corrected[eye].fov,corrected[eye+2].fov);
++        auto blend_inset=insets[eye];
++        if(stable_sizes[eye][0]>0.f){blend_inset[2]=stable_sizes[eye][0];blend_inset[3]=stable_sizes[eye][1];}
++        blends[eye]=quad_focus_blend(focus,blend_inset,widths[eye],heights[eye]);
++    }
++    // Stereo matching changes the projected inset with eye pose, even with head offset off.
++    const auto stereo_key=focus.match_stereo_borders&&stable_sizes[0][0]>0.f?
++        std::bit_cast<uint32_t>(focus.stereo_distance_m):0u;
+     if(!compositor->d3d11){
+         const auto runtime=GetModuleHandleW(L"CheekyFoveatedDLSSRuntime.dll");
+         const auto query=runtime?reinterpret_cast<CheekyQuadComposeOptionsFn>(GetProcAddress(runtime,"CheekyQuad_GetComposeOptionsV1")):nullptr;
+@@ -257,28 +316,23 @@ XrResult quad_capture_end(XrSession session,const XrFrameEndInfo* info,const Dis
+         // Prove the four-view guide/sharing path while the application still
+         // owns ordinary runtime frames. No color bridge or pacing takeover.
+         auto& eleven=*compositor->d3d11;auto roles=eleven.mapping->snapshot();roles.active=1;
+-        std::array<unsigned,2> widths{},heights{};std::array<std::array<float,4>,2> insets;
+-        for(unsigned eye=0;eye<2;++eye){widths[eye]=compositor->recommended[eye].recommendedImageRectWidth;
+-            heights[eye]=compositor->recommended[eye].recommendedImageRectHeight;
+-            insets[eye]=cheeky::quad_capture::inset_rect(corrected[eye].fov,corrected[eye+2].fov);}
+         const bool was_ready=eleven.fg_guides->ready();
+-        auto probe=eleven.fg_guides->build(roles,projection,widths,heights,insets,*eleven.fg_bridge);
++        eleven.fg_guides->precompose=eleven.precompose;
++        auto probe=eleven.fg_guides->build(roles,projection,widths,heights,insets,*eleven.fg_bridge,blends,stable_sizes,focus.head_offset,stereo_key);
+         if(probe.pair.capture_token&&!was_ready)log_startup("QUAD-FG four-view guide preflight ready; presentation eligible at next frame boundary\n");
+     }
+     if(native11&&compositor->d3d11){
+         // Native D3D11 shader FG: full-eye guide atlases, composed eye colors,
+         // then the shared buffered pacing. No D3D12 bridge.
+         auto& eleven=*compositor->d3d11;auto roles=eleven.mapping->snapshot();roles.active=1;
+-        std::array<std::array<float,4>,2> insets;
+-        for(unsigned eye=0;eye<2;++eye)insets[eye]=cheeky::quad_capture::inset_rect(corrected[eye].fov,corrected[eye+2].fov);
+-        CheekyFgColorOptionsV1 color_options;const bool color_only=cheeky::fg::optical::color_options(color_options);
+-        auto guides=eleven.fg_guides->build_native(roles,projection,insets);
+-        if(color_only)for(unsigned eye=0;eye<2;++eye)native11->native11->optical_quad_regions[eye]=insets[eye];
++        CheekyFgColorOptionsV1 color_options;const bool color_only=cheeky::fg::optical::color_options(color_options,true);
++        auto guides=eleven.fg_guides->build_native(roles,projection,insets,blends,stable_sizes,focus.head_offset,stereo_key);
++        if(color_only)for(unsigned eye=0;eye<2;++eye)native11->native11->optical_quad_regions[eye]={0.f,0.f,1.f,1.f};
+         if(guides.valid)for(unsigned eye=0;eye<2;++eye){
+             auto meta=guides.meta[eye];meta.focus_feather=2.f/std::max(1u,std::min(compositor->recommended[eye].recommendedImageRectWidth,
+                 compositor->recommended[eye].recommendedImageRectHeight));
+             native11->native11->adopt_quad_guides(eye,guides.depth[eye].Get(),guides.motion[eye].Get(),
+-                guides.depth_srv[eye].Get(),guides.motion_srv[eye].Get(),meta);
++                guides.depth_srv[eye].Get(),guides.motion_srv[eye].Get(),meta,guides.lease.Get());
+         }
+         std::array<XrSwapchain,4> sources{};for(unsigned i=0;i<4;++i)sources[i]=inputs[i].image.swapchain;
+         native11->set_quad_sources11(sources);
+@@ -288,30 +342,39 @@ XrResult quad_capture_end(XrSession session,const XrFrameEndInfo* info,const Dis
+         if(result==XR_SUCCESS)result=native11->end_frame(&forwarded,{},&replacement);
+     }else if(presenter&&compositor->d3d11&&presenter->interop11){
+         auto& eleven=*compositor->d3d11;auto roles=eleven.mapping->snapshot();roles.active=1;
+-        std::array<unsigned,2> widths{},heights{};
+-        for(unsigned eye=0;eye<2;++eye){widths[eye]=compositor->recommended[eye].recommendedImageRectWidth;heights[eye]=compositor->recommended[eye].recommendedImageRectHeight;
++        eleven.fg_guides->precompose=eleven.precompose;
++        presenter->set_quad_sources11(eleven.source_chains);
++        for(unsigned eye=0;eye<2;++eye){
+             views[eye]=corrected[eye];views[eye].next=nullptr;views[eye].subImage.imageRect={{0,0},{int32_t(widths[eye]),int32_t(heights[eye])}};views[eye].subImage.imageArrayIndex=0;}
+-        std::array<std::array<float,4>,2> insets;
+-        for(unsigned eye=0;eye<2;++eye)insets[eye]=cheeky::quad_capture::inset_rect(corrected[eye].fov,corrected[eye+2].fov);
+-        auto guides=eleven.fg_guides->build(roles,projection,widths,heights,insets,*presenter->interop11);
+-        // Native color publication does not require an inference lease. Keep
+-        // the packed raw views even if a guide pool slot is temporarily busy.
+-        const bool packed=presenter->capture_quad_planes(projection,replacement,insets,guides.pair);
+-        static thread_local uint64_t fg_submissions{};
+-        const auto fg_submission=++fg_submissions;
+-        if(fg_submission<=3||fg_submission%240==0){const auto stats=eleven.fg_guides->stats();
+-            log_startup("QUAD-FG submit guides=%u packed=%u roles=%u manual=%u observations=%llu snapshots=%llu pairs=%llu capture_stage=%u assembly_stage=%u\n",
+-                unsigned(guides.pair.capture_token!=0),unsigned(packed),roles.status,roles.manual_mode,stats.observations,stats.snapshots,stats.guide_pairs,stats.capture_stage,stats.assembly_stage);}
+-        if(packed){
+-            // The raw center/peripheral planes remain separate in storage.
+-            // DLSS-G runs on the raw center; final color composition is last.
+-            if(diagnostic)log_startup("QUAD-FG raw planes before composition four_view_guides=%u token=%llu\n",unsigned(guides.pair.capture_token!=0),guides.pair.capture_token);
+-            result=presenter->end_quad_frame(&forwarded,&replacement,guides.pair,[&]{return compositor->compose(inputs,projection,views);});
++        auto guides=eleven.fg_guides->build(roles,projection,widths,heights,insets,*presenter->interop11,blends,
++            eleven.precompose?stable_sizes:decltype(stable_sizes){},focus.head_offset,
++            eleven.precompose?stereo_key:0u);
++        if(!eleven.precompose){
++            // Legacy comparison: keep raw Quad planes until the FG publication
++            // pass. The existing callback composes native frames on submission.
++            const bool packed=presenter->capture_quad_planes(projection,replacement,insets,guides.pair);
++            result=presenter->end_quad_frame(&forwarded,packed?&replacement:nullptr,packed?guides.pair:CheekyFgPair{},
++                [&]{return compositor->compose(inputs,projection,views);});
+         }else{
+-            // Missing assignments/guides or capture pressure uses the proven
+-            // native compositor. A null projection selects coordinated runtime
+-            // passthrough; no precomposed colors enter the FG upload path.
+-            result=presenter->end_quad_frame(&forwarded,nullptr,{},[&]{return compositor->compose(inputs,projection,views);});
++        // Capture the same composed eyes submitted by the native D3D11 path.
++        // Keep the existing guide regions and let the selected FG method consume them.
++        unsigned captured_mask{};
++        eleven.composed_capacity=presenter->slot_count()+1;
++        eleven.capture_shared_output=[&](unsigned eye,XrSwapchain chain,const std::shared_ptr<cheeky::quad_capture::Compositor11::ComposedSlot>& frame){
++            auto image=std::make_shared<cheeky::fg::TransportImage>();
++            image->texture=frame->color12[eye];image->state=D3D12_RESOURCE_STATE_COMMON;
++            image->presentation_format=eleven.eyes[eye].format;image->source_owner=frame;
++            static std::atomic<std::uint64_t> identities{};image->identity=++identities;
++            const bool good=presenter->capture_shared11(chain,image);if(good)captured_mask|=1u<<eye;return good;};
++        result=compositor->compose(inputs,projection,views);eleven.capture_shared_output={};
++        if(result==XR_SUCCESS&&captured_mask!=3u){
++            // A busy bounded slot pool preserves this native frame. Missing
++            // captures make the existing presenter choose native passthrough.
++            for(const auto& eye:eleven.eyes)presenter->capture_shared11(eye.chain,{});
++        }
++        if(result==XR_SUCCESS){
++            result=presenter->end_quad_frame(&forwarded,&replacement,guides.pair);
++        }
+         }
+     }else if(presenter&&!compositor->d3d11){
+         // D3D12: the composed eyes are an ordinary stereo frame for the shared
+@@ -382,7 +445,10 @@ extern "C" __declspec(dllexport) void __cdecl CheekyQuad_ConfigureV1(uint32_t ma
+     try {const auto owner=quad_role_owner();if(owner&&owner->d3d11&&owner->d3d11->mapping)owner->d3d11->mapping->configure(manual!=0,numbers!=0);}catch(...){}
+ }
+ extern "C" __declspec(dllexport) void __cdecl CheekyQuad_ForgetSourceV1(uint64_t id,uint64_t generation) noexcept {
+-    try {const auto owner=quad_role_owner();if(owner&&owner->d3d11&&owner->d3d11->mapping)owner->d3d11->mapping->forget(id,generation);}catch(...){}
++    try {const auto owner=quad_role_owner();if(owner&&owner->d3d11){
++        if(owner->d3d11->mapping)owner->d3d11->mapping->forget(id,generation);
++        if(owner->d3d11->fg_guides)owner->d3d11->fg_guides->forget(id,generation);
++    }}catch(...){}
+ }
+ extern "C" __declspec(dllexport) void __cdecl CheekyQuad_RecalibrateV1() noexcept {
+     try {const auto owner=quad_role_owner();if(owner&&owner->d3d11&&owner->d3d11->mapping)owner->d3d11->mapping->reset();}catch(...){}
+@@ -402,6 +468,23 @@ extern "C" __declspec(dllexport) bool __cdecl CheekyQuadFG_ObserveD3D11V1(const
+         const auto owner=quad_role_owner(nullptr,device.Get());return owner&&owner->d3d11&&owner->d3d11->fg_guides&&owner->d3d11->fg_guides->observe(*input);
+     }catch(...){return false;}
+ }
++extern "C" __declspec(dllexport) unsigned __cdecl CheekyQuadFG_GetInputMaskV1(unsigned center_method) noexcept {
++    const auto owner=quad_role_owner();
++    return owner&&owner->d3d11&&owner->d3d11->fg_guides?owner->d3d11->fg_guides->input_mask(center_method):0;
++}
++extern "C" __declspec(dllexport) void __cdecl CheekyQuad_GetQualitySampleV1(
++    uint64_t session_generation, CheekyQuadQualitySampleV1* sample) noexcept {
++    std::lock_guard lock(state_mutex);
++    for (const auto& [handle, owner] : sessions) {
++        if (owner.generation != session_generation) continue;
++        const auto presenter=std::dynamic_pointer_cast<cheeky::fg::BufferedPresenter>(owner.fg);
++        if (presenter&&presenter->automatic_quad_quality.load(std::memory_order_relaxed)) {
++            std::lock_guard sample_lock(presenter->quality_sample_mutex);
++            *sample=presenter->quality_sample;
++        }
++        return;
++    }
++}
+ extern "C" __declspec(dllexport) bool __cdecl CheekyQuadFG_GetStatsV1(CheekyQuadFgStatsV1* out) noexcept {
+     if(!out||out->abi!=1||out->size!=sizeof(*out))return false;
+     try{const auto owner=quad_role_owner();if(!owner||!owner->d3d11||!owner->d3d11->fg_guides)return false;
+diff --git a/openxr_layer/quad_color_match11.hpp b/openxr_layer/quad_color_match11.hpp
+new file mode 100644
+index 0000000..f8e9259
+--- /dev/null
++++ b/openxr_layer/quad_color_match11.hpp
+@@ -0,0 +1,436 @@
++#pragma once
++#include "../shared/fg_precompiled.hpp"
++#include "../shared/quad_blend_shader.hpp"
++#include <d3d11.h>
++#include <wrl/client.h>
++#include <array>
++#include <algorithm>
++#include <chrono>
++#include <cmath>
++
++namespace cheeky::quad_capture {
++
++inline constexpr char color_match_shader[]=CHEEKY_QUAD_BLEND_HLSL R"HLSL(
++Texture2DArray<float4> Context:register(t0);
++Texture2DArray<float4> Focus:register(t1);
++Texture2DArray<float4> RightContext:register(t3);
++Texture2DArray<float4> RightFocus:register(t4);
++Texture1DArray<float4> Gains:register(t5);
++Texture2DArray<float4> GridInput:register(t6);
++Texture2DArray<float4> LocalCurves:register(t7);
++Texture2DArray<float4> PreviousCurves:register(t8);
++RWTexture2DArray<float4> GridOutput:register(u1);
++RWTexture1DArray<float4> ToneGainOutput:register(u2);
++RWTexture2DArray<float4> CurveOutput:register(u3);
++SamplerState Linear:register(s0);
++cbuffer Params:register(b0){float4 ContextUV;float4 FocusUV;float4 Inset;float4 Blend;};
++cbuffer RightParams:register(b2){float4 RightContextUV;float4 RightFocusUV;float4 RightInset;float4 RightBlend;float CurveHistoryWeight;};
++struct V{float4 p:SV_Position;float2 uv:TEXCOORD0;};
++
++static const uint MaxGrid=64;
++
++uint2 gridSize(float2 size) {
++    return max(uint2(1,1),uint2(round(size*(MaxGrid/max(size.x,size.y)))));
++}
++
++float2 eyeSize(bool right) {
++    return right?RightInset.zw*RightBlend.xy:Inset.zw*Blend.xy;
++}
++
++float2 pairWeights(float i,float lo,float hi) {
++    const float2 starts=float2(i,i+1.0);
++    return max(0.0,min(starts+1.0,hi)-max(starts,lo));
++}
++
++// A weighted bilinear read exactly combines up to four texels. Fractional
++// texel coverage keeps the two views on the same angular box footprint.
++float3 boxAverage(Texture2DArray<float4> image,float2 lo,float2 hi) {
++    uint width,height,layers;
++    image.GetDimensions(width,height,layers);
++    const float2 size=float2(width,height);
++    lo*=size;hi*=size;
++    float3 sum=0.0;
++    float total=0.0;
++    [loop]for(float y=floor(lo.y);y<hi.y;y+=2.0){
++        const float2 wy=pairWeights(y,lo.y,hi.y);
++        const float sy=wy.x+wy.y;
++        const float v=(y+.5+wy.y/sy)/size.y;
++        [loop]for(float x=floor(lo.x);x<hi.x;x+=2.0){
++            const float2 wx=pairWeights(x,lo.x,hi.x);
++            const float sx=wx.x+wx.y;
++            const float u=(x+.5+wx.y/sx)/size.x;
++            const float weight=sx*sy;
++            sum+=image.SampleLevel(Linear,float3(u,v,0),0).rgb*weight;
++            total+=weight;
++        }
++    }
++    return max(0.0,sum/total);
++}
++
++[numthreads(8,8,1)]
++void DownsampleGrid(uint3 id:SV_DispatchThreadID) {
++    const bool right=id.z>=2;
++    const uint2 extent=gridSize(eyeSize(right));
++    if(any(id.xy>=extent))return;
++    float2 lo=float2(id.xy)/extent,hi=float2(id.xy+1)/extent;
++    const bool isFocus=(id.z&1)!=0;
++    const float4 inset=right?RightInset:Inset;
++    if(!isFocus){
++        lo=inset.xy+lo*inset.zw;
++        hi=inset.xy+hi*inset.zw;
++    }
++    const float4 uv=right?(isFocus?RightFocusUV:RightContextUV):(isFocus?FocusUV:ContextUV);
++    lo=uv.xy+lo*uv.zw;
++    hi=uv.xy+hi*uv.zw;
++    float3 average;
++    if(right){
++        if(isFocus)average=boxAverage(RightFocus,lo,hi);
++        else average=boxAverage(RightContext,lo,hi);
++    }else{
++        if(isFocus)average=boxAverage(Focus,lo,hi);
++        else average=boxAverage(Context,lo,hi);
++    }
++    GridOutput[id]=float4(average,1.0);
++}
++
++static const float3 Luma=float3(.2126,.7152,.0722);
++static const uint BandLanes=128;
++groupshared float3 bandOuter[3][BandLanes],bandFocus[3][BandLanes];
++
++float4 sideDistances(float2 uv) {
++    return float4(uv.x,1.0-uv.x,uv.y,1.0-uv.y);
++}
++
++float toneBand(float luma) {
++    // Linear-light anchors for the shadow, midtone and highlight gains.
++    return luma<.22?smoothstep(.04,.22,luma):1.0+smoothstep(.22,.65,luma);
++}
++
++[numthreads(BandLanes,1,1)]
++void ReduceToneBands(uint lane:SV_GroupIndex,uint3 group:SV_GroupID) {
++    const uint2 extent=gridSize(eyeSize(group.y!=0));
++    float3 outerSum[3],focusSum[3];
++    [unroll]for(uint band=0;band<3;++band){
++        outerSum[band]=0.0;
++        focusSum[band]=0.0;
++    }
++    for(uint index=lane;index<extent.x*extent.y;index+=BandLanes){
++        const uint2 xy=uint2(index%extent.x,index/extent.x);
++        const float3 outer=GridInput.Load(int4(xy,group.y*2,0)).rgb;
++        const float3 focus=GridInput.Load(int4(xy,group.y*2+1,0)).rgb;
++        const float tone=toneBand(dot(outer,Luma));
++        const float proximity=1.0-sideDistances((xy+.5)/extent)[group.x];
++        const float spatial=proximity*proximity;
++        [unroll]for(uint band=0;band<3;++band){
++            const float weight=spatial*saturate(1.0-abs(tone-float(band)));
++            outerSum[band]+=outer*weight;
++            focusSum[band]+=focus*weight;
++        }
++    }
++    [unroll]for(uint band=0;band<3;++band){
++        bandOuter[band][lane]=outerSum[band];
++        bandFocus[band][lane]=focusSum[band];
++    }
++    GroupMemoryBarrierWithGroupSync();
++    [unroll]for(uint stride=BandLanes/2;stride>0;stride>>=1){
++        if(lane<stride){
++            [unroll]for(uint band=0;band<3;++band){
++                bandOuter[band][lane]+=bandOuter[band][lane+stride];
++                bandFocus[band][lane]+=bandFocus[band][lane+stride];
++            }
++        }
++        GroupMemoryBarrierWithGroupSync();
++    }
++    if(lane<3){
++        const float3 gain=(bandFocus[lane][0]+.001)/(bandOuter[lane][0]+.001);
++        ToneGainOutput[uint2(lane,group.y*4+group.x)]=float4(gain,1.0);
++    }
++}
++
++float3 srgbEncode(float3 color) {
++    const float3 c=saturate(color);
++    return lerp(1.055*pow(c,1.0/2.4)-.055,12.92*c,step(c,.0031308));
++}
++
++float3 srgbDecode(float3 color) {
++    const float3 c=saturate(color);
++    return lerp(pow((c+.055)/1.055,2.4),c/12.92,step(c,.04045));
++}
++
++float4 directionWeights(float2 local,float softness) {
++    const float4 inv=rcp(sideDistances(local)+softness);
++    return inv*inv/dot(inv,inv);
++}
++
++// Each group fits one overlapping region along one edge for one eye.
++// Fixed-point sums keep the per-channel histograms within SM5 shared memory.
++groupshared int localDelta[768];
++groupshared uint localSupport[768];
++
++[numthreads(128,1,1)]
++void FitLocalChannels(uint lane:SV_GroupIndex,uint3 group:SV_GroupID) {
++    const uint zone=group.x,side=group.y,eye=group.z;
++    const bool right=eye!=0,vertical=side<2;
++    const float4 inset=right?RightInset:Inset;
++    const float4 outerUV=right?RightContextUV:ContextUV;
++    const float4 focusUV=right?RightFocusUV:FocusUV;
++    const float2 size=eyeSize(right);
++    const float extent=vertical?size.x:size.y;
++    uint width,height,layers;
++    if(right)RightContext.GetDimensions(width,height,layers);
++    else Context.GetDimensions(width,height,layers);
++    const float2 textureSize=float2(width,height);
++    const float2 origin=(outerUV.xy+inset.xy*outerUV.zw)*textureSize;
++    const float2 span=inset.zw*outerUV.zw*textureSize;
++    const float2 depth=saturate(float2(8,40)/extent);
++    const float2 normal=(side&1)?1-depth.yx:depth;
++    const float2 stripBegin=origin+span*(vertical?float2(normal.x,0):float2(0,normal.x));
++    const float2 stripEnd=origin+span*(vertical?float2(normal.y,1):float2(1,normal.y));
++    const float2 along=saturate((float(zone)+float2(-.5,1.5))/8);
++    const float2 zoneBegin=vertical?float2(stripBegin.x,origin.y+along.x*span.y):float2(origin.x+along.x*span.x,stripBegin.y);
++    const float2 zoneEnd=vertical?float2(stripEnd.x,origin.y+along.y*span.y):float2(origin.x+along.y*span.x,stripEnd.y);
++    const int2 begin=clamp(int2(floor(zoneBegin)),0,int2(width,height));
++    const int2 end=clamp(int2(ceil(zoneEnd)),0,int2(width,height));
++    const uint2 count=uint2(max(end-begin,0));
++    for(uint i=lane;i<768;i+=128){
++        localDelta[i]=0;
++        localSupport[i]=0;
++    }
++    GroupMemoryBarrierWithGroupSync();
++    for(uint i=lane;i<count.x*count.y;i+=128){
++        const int2 texel=begin+int2(i%count.x,i/count.x);
++        // A cut texel contributes in proportion to its overlap with the strip.
++        const float2 lo=max(float2(texel),stripBegin);
++        const float2 hi=min(float2(texel)+1,stripEnd);
++        const float2 overlap=max(hi-lo,0);
++        const float2 local=((lo+hi)*.5-origin)/span;
++        const float axis=clamp((vertical?local.y:local.x)*8-.5,0,7);
++        const float weight=overlap.x*overlap.y*smoothstep(0,1,1-abs(axis-float(zone)));
++        const uint fixedWeight=(uint)round(weight*256);
++        if(!fixedWeight)continue;
++        const float3 focusPos=float3(focusUV.xy+local*focusUV.zw,0);
++        const int4 outerPos=int4(texel,0,0);
++        const float3 raw=srgbEncode(right?RightContext.Load(outerPos).rgb:Context.Load(outerPos).rgb);
++        const float3 target=srgbEncode(right?RightFocus.SampleLevel(Linear,focusPos,0).rgb:
++            Focus.SampleLevel(Linear,focusPos,0).rgb);
++        [unroll]for(uint c=0;c<3;++c){
++            const uint code=(uint)round(raw[c]*255);
++            InterlockedAdd(localDelta[c*256+code],(int)round((target[c]-raw[c])*(255*fixedWeight)));
++            InterlockedAdd(localSupport[c*256+code],fixedWeight);
++        }
++    }
++    GroupMemoryBarrierWithGroupSync();
++    for(uint i=lane;i<768;i+=128){
++        const int c=int(i/256),code=int(i%256);
++        float d=0,w=0,kernel=0;
++        [unroll]for(int offset=-8;offset<=8;++offset){
++            const int value=code+offset;
++            const int reflected=value<0?-value-1:(value>255?511-value:value);
++            const float coeff=exp(-.125*offset*offset);
++            d+=coeff*localDelta[c*256+reflected];
++            w+=coeff*localSupport[c*256+reflected];
++            kernel+=coeff;
++        }
++        const float support=w+256*kernel;
++        const uint3 pos=uint3(code,zone,eye*12+side*3+c);
++        float2 fit=float2(d/(255*support),w/support);
++        // Smooth the correction and its support together so sparse bins fade consistently.
++        if(CurveHistoryWeight>0)
++            fit=lerp(fit,PreviousCurves.Load(int4(pos,0)).rg,CurveHistoryWeight);
++        CurveOutput[pos]=float4(fit,0,0);
++    }
++}
++
++float3 applyLocalChannels(float3 raw,float3 base,float2 local,float2 size) {
++    const float2 edge=saturate(local);
++    const float distance=length((local-edge)*size);
++    const float reach=.25*min(size.x,size.y);
++    [branch]if(distance>=reach)return base;
++    const float4 spatial=directionWeights(edge,.025);
++    const float3 value=srgbEncode(raw);
++    const float3 code=(value*255+.5)/256;
++    float3 delta=0,support=0;
++    [unroll]for(uint side=0;side<4;++side){
++        const float t=clamp(((side<2)?edge.y:edge.x)*8-.5,0,7);
++        const float zone=(floor(t)+smoothstep(0,1,frac(t))+.5)/8;
++        [unroll]for(uint c=0;c<3;++c){
++            const float2 fit=LocalCurves.SampleLevel(Linear,float3(code[c],zone,side*3+c),0).rg;
++            delta[c]+=spatial[side]*fit.x;
++            support[c]+=spatial[side]*fit.y;
++        }
++    }
++    const float3 corrected=srgbDecode(value*support+delta+srgbEncode(base)*(1-support));
++    return lerp(corrected,base,smoothstep(0,reach,distance));
++}
++
++float4 ApplyColorMatch(V v):SV_Target {
++    const float2 local=(v.uv-Inset.xy)/Inset.zw;
++    const float blend=quadFocusWeight(local,Inset.zw,Blend);
++    float4 c=Context.SampleLevel(Linear,float3(ContextUV.xy+v.uv*ContextUV.zw,0),0);
++    [branch]if(blend<1.0){
++        const float tone=toneBand(dot(c.rgb,Luma));
++        // Continue the nearest boundary's tonal correction outside the focus view.
++        const float4 weights=directionWeights(saturate(local),.1);
++        const float band=(tone+.5)/3.0;
++        float3 gain=0.0;
++        [unroll]for(uint side=0;side<4;++side)
++            gain+=weights[side]*Gains.SampleLevel(Linear,float2(band,float(side)),0).rgb;
++        const float3 base=c.rgb*gain;
++        c.rgb=applyLocalChannels(c.rgb,base,local,Inset.zw*Blend.xy);
++    }
++    const float4 f=Focus.SampleLevel(Linear,float3(FocusUV.xy+saturate(local)*FocusUV.zw,0),0);
++    return lerp(c,f,blend);
++}
++)HLSL";
++
++class QuadColorMatch11 {
++    template<class T> using Ptr = Microsoft::WRL::ComPtr<T>;
++    Ptr<ID3D11ComputeShader> downsample, reduce_tones, fit_local;
++    Ptr<ID3D11Buffer> right_constants;
++    Ptr<ID3D11ShaderResourceView> grid_colors;
++    Ptr<ID3D11UnorderedAccessView> write_grid;
++    std::array<Ptr<ID3D11ShaderResourceView>,2> eye_gains;
++    Ptr<ID3D11UnorderedAccessView> write_gains;
++    struct Curves {
++        Ptr<ID3D11Texture2D> texture;
++        Ptr<ID3D11UnorderedAccessView> output;
++        Ptr<ID3D11ShaderResourceView> history;
++        std::array<Ptr<ID3D11ShaderResourceView>,2> eyes;
++    };
++    std::array<Curves,2> curves;
++    unsigned current_curves{};
++    using Clock=std::chrono::steady_clock;
++    Clock::time_point last_fit{};
++    static constexpr UINT grid_size=64;
++
++    bool make_compute(ID3D11Device* device,const auto& bytecode,ID3D11ComputeShader** shader) {
++        Ptr<ID3DBlob> blob;
++        return SUCCEEDED(fg::bytecode::blob(bytecode,&blob))&&
++            SUCCEEDED(device->CreateComputeShader(blob->GetBufferPointer(),blob->GetBufferSize(),nullptr,shader));
++    }
++
++public:
++    Ptr<ID3D11PixelShader> apply;
++
++    bool initialize(ID3D11Device* device) {
++        if(curves[1].eyes[1])return true;
++        Ptr<ID3DBlob> pixel;
++        if(!make_compute(device,fg::bytecode::quad_color_match_downsamplegrid_cs_5_0,&downsample)||
++           !make_compute(device,fg::bytecode::quad_color_match_reducetonebands_cs_5_0,&reduce_tones)||
++           !make_compute(device,fg::bytecode::quad_color_match_fitlocalchannels_cs_5_0,&fit_local)||
++           FAILED(fg::bytecode::blob(fg::bytecode::quad_color_match_applycolormatch_ps_5_0,&pixel))||
++           FAILED(device->CreatePixelShader(pixel->GetBufferPointer(),pixel->GetBufferSize(),nullptr,&apply)))return false;
++
++        D3D11_BUFFER_DESC constants{};
++        constants.ByteWidth=80;
++        constants.BindFlags=D3D11_BIND_CONSTANT_BUFFER;
++        if(FAILED(device->CreateBuffer(&constants,nullptr,&right_constants)))return false;
++
++        D3D11_TEXTURE2D_DESC grid{};
++        grid.Width=grid.Height=grid_size;
++        grid.MipLevels=grid.SampleDesc.Count=1;
++        grid.ArraySize=4;
++        grid.Format=DXGI_FORMAT_R32G32B32A32_FLOAT;
++        grid.BindFlags=D3D11_BIND_SHADER_RESOURCE|D3D11_BIND_UNORDERED_ACCESS;
++        Ptr<ID3D11Texture2D> grid_texture;
++        if(FAILED(device->CreateTexture2D(&grid,nullptr,&grid_texture))||
++           FAILED(device->CreateShaderResourceView(grid_texture.Get(),nullptr,&grid_colors))||
++           FAILED(device->CreateUnorderedAccessView(grid_texture.Get(),nullptr,&write_grid)))return false;
++
++        D3D11_TEXTURE1D_DESC bands{};
++        bands.Width=3;
++        bands.MipLevels=1;
++        bands.ArraySize=8;
++        bands.Format=grid.Format;
++        bands.BindFlags=grid.BindFlags;
++        Ptr<ID3D11Texture1D> gains;
++        if(FAILED(device->CreateTexture1D(&bands,nullptr,&gains))||
++           FAILED(device->CreateUnorderedAccessView(gains.Get(),nullptr,&write_gains)))return false;
++        // Each draw reads only the tone gains from its own eye.
++        D3D11_SHADER_RESOURCE_VIEW_DESC slice{};
++        slice.Format=bands.Format;
++        slice.ViewDimension=D3D11_SRV_DIMENSION_TEXTURE1DARRAY;
++        slice.Texture1DArray.MipLevels=1;
++        slice.Texture1DArray.ArraySize=4;
++        for(UINT eye=0;eye<eye_gains.size();++eye){
++            slice.Texture1DArray.FirstArraySlice=eye*4;
++            if(FAILED(device->CreateShaderResourceView(gains.Get(),&slice,&eye_gains[eye])))return false;
++        }
++
++        const D3D11_TEXTURE2D_DESC desc{256,8,1,24,DXGI_FORMAT_R32G32B32A32_FLOAT,{1,0},D3D11_USAGE_DEFAULT,
++            D3D11_BIND_SHADER_RESOURCE|D3D11_BIND_UNORDERED_ACCESS,0,0};
++        D3D11_SHADER_RESOURCE_VIEW_DESC curve_slice{desc.Format,D3D11_SRV_DIMENSION_TEXTURE2DARRAY};
++        for(auto& table:curves){
++            if(FAILED(device->CreateTexture2D(&desc,nullptr,&table.texture))||
++               FAILED(device->CreateUnorderedAccessView(table.texture.Get(),nullptr,&table.output))||
++               FAILED(device->CreateShaderResourceView(table.texture.Get(),nullptr,&table.history)))return false;
++            curve_slice.Texture2DArray={0,1,0,12};
++            for(UINT eye=0;eye<table.eyes.size();++eye){
++                curve_slice.Texture2DArray.FirstArraySlice=eye*12;
++                if(FAILED(device->CreateShaderResourceView(table.texture.Get(),&curve_slice,&table.eyes[eye])))return false;
++            }
++        }
++        return true;
++    }
++
++    template<class Draw>
++    void record(ID3D11DeviceContext* ctx,ID3D11Buffer* left,ID3D11SamplerState* linear,
++        const std::array<Draw,2>& eyes) {
++        auto* right=right_constants.Get();
++        ctx->UpdateSubresource(left,0,nullptr,eyes[0].params.data(),0,0);
++        std::array<float,20> right_params{};
++        std::copy_n(eyes[1].params.data(),16,right_params.data());
++        const auto now=Clock::now();
++        if(last_fit!=Clock::time_point{}){
++            constexpr float half_life_seconds=.10f;
++            const float elapsed=std::chrono::duration<float>(now-last_fit).count();
++            right_params[16]=std::exp2(-elapsed/half_life_seconds);
++        }
++        last_fit=now;
++        ctx->UpdateSubresource(right,0,nullptr,right_params.data(),0,0);
++        ctx->CSSetConstantBuffers(0,1,&left);
++        ctx->CSSetConstantBuffers(2,1,&right);
++        ctx->CSSetSamplers(0,1,&linear);
++        ID3D11ShaderResourceView* inputs[]{eyes[0].sources[0].Get(),eyes[0].sources[1].Get(),nullptr,
++            eyes[1].sources[0].Get(),eyes[1].sources[1].Get()};
++        ctx->CSSetShaderResources(0,5,inputs);
++        auto* output=write_grid.Get();
++        ID3D11UnorderedAccessView* no_output{};
++        ctx->CSSetUnorderedAccessViews(1,1,&output,nullptr);
++        ctx->CSSetShader(downsample.Get(),nullptr,0);
++        ctx->Dispatch(grid_size/8,grid_size/8,4);
++        ctx->CSSetUnorderedAccessViews(1,1,&no_output,nullptr);
++
++        auto* input=grid_colors.Get();
++        output=write_gains.Get();
++        ctx->CSSetShaderResources(6,1,&input);
++        ctx->CSSetUnorderedAccessViews(2,1,&output,nullptr);
++        ctx->CSSetShader(reduce_tones.Get(),nullptr,0);
++        ctx->Dispatch(4,2,1);
++        ctx->CSSetUnorderedAccessViews(2,1,&no_output,nullptr);
++        auto* previous=right_params[16]>0?curves[current_curves].history.Get():nullptr;
++        current_curves^=1;
++        auto* next=curves[current_curves].output.Get();
++        ctx->CSSetShaderResources(8,1,&previous);
++        ctx->CSSetUnorderedAccessViews(3,1,&next,nullptr);
++        ctx->CSSetShader(fit_local.Get(),nullptr,0);
++        ctx->Dispatch(8,4,2);
++        ctx->CSSetUnorderedAccessViews(3,1,&no_output,nullptr);
++        ID3D11ShaderResourceView* no_input{};
++        ctx->CSSetShaderResources(8,1,&no_input);
++        ID3D11ShaderResourceView* empty[5]{};
++        ctx->CSSetShaderResources(0,5,empty);
++        ctx->CSSetShaderResources(6,1,empty);
++    }
++
++    void bind(ID3D11DeviceContext* ctx,unsigned eye) const {
++        auto* lookup=eye_gains[eye].Get();
++        ctx->PSSetShaderResources(5,1,&lookup);
++        auto* lookup_curves=curves[current_curves].eyes[eye].Get();
++        ctx->PSSetShaderResources(7,1,&lookup_curves);
++    }
++
++    void reset_history() { last_fit={}; }
++};
++
++} // namespace cheeky::quad_capture
+diff --git a/openxr_layer/quad_fg.hpp b/openxr_layer/quad_fg.hpp
+index 88107e0..47c8893 100644
+--- a/openxr_layer/quad_fg.hpp
++++ b/openxr_layer/quad_fg.hpp
+@@ -3,6 +3,7 @@
+ #include "../shared/cheeky_quad_fg.hpp"
+ #include "../shared/cheeky_quad_views.h"
+ #include "../shared/fg_guide_layout.hpp"
++#include "../shared/quad_blend_shader.hpp"
+ #include "fg_d3d11.hpp"
+ #include "fg_timing11.hpp"
+ #include <d3dcompiler.h>
+@@ -19,7 +20,7 @@ namespace cheeky::quad_capture {
+ class QuadFg11 {
+     template<class T>using Ptr=Microsoft::WRL::ComPtr<T>;
+     struct Pair11 {Ptr<ID3D11Texture2D> depth,motion;Ptr<ID3D11ShaderResourceView> depth_srv,motion_srv;
+-        Ptr<ID3D11UnorderedAccessView> depth_uav,motion_uav;unsigned width{},height{};};
++        Ptr<ID3D11UnorderedAccessView> depth_uav,motion_uav;unsigned width{},height{},inputs{};bool native{};};
+     struct Source {uint64_t id{},generation{},interval{};unsigned evaluations{};CheekyQuadFgSourceV1 metadata;Pair11 image;};
+     struct Frame {std::array<Pair11,2> image;std::array<Ptr<ID3D12Resource>,2> depth,motion;};
+     struct Lease final:IUnknown {std::atomic<ULONG> refs{1};std::shared_ptr<Frame> frame;
+@@ -37,61 +38,98 @@ class QuadFg11 {
+     struct StateScope {QuadFg11& owner;Ptr<ID3DDeviceContextState> previous;
+         explicit StateScope(QuadFg11& o):owner(o){owner.context1->SwapDeviceContextState(owner.state.Get(),&previous);}
+         ~StateScope(){owner.context1->SwapDeviceContextState(previous.Get(),nullptr);}};
+-    Ptr<ID3D11ComputeShader> snapshot_shader,atlas_shader;Ptr<ID3D11Buffer> constants;
+-    std::mutex mutex;std::atomic<bool> enabled{},atlas_ready{};
++    Ptr<ID3D11ComputeShader> snapshot_shader,atlas_shader,native_snapshot_shader,native_atlas_shader;Ptr<ID3D11Buffer> constants;
++    enum Mode {disabled,bridged,native};
++    static constexpr unsigned all_guides=cheeky_fg_game_depth|cheeky_fg_game_motion;
++    static unsigned input_mask(Mode mode,unsigned center_method)noexcept{
++        // Native precompose feeds one complete eye to the center method.
++        if(mode==native)return cheeky_fg_game_inputs(center_method);
++        return mode==bridged?all_guides:0;
++    }
++    std::mutex mutex;std::atomic<Mode> mode{disabled};std::atomic<bool> atlas_ready{};
+     std::array<Source,8> sources;std::array<std::shared_ptr<Frame>,4> frames;
+     uint64_t interval{1},serial{},last_configuration{},last_built_interval{};
+     CheekyQuadFgStatsV1 diagnostics;
+     cheeky::fg::StageTimings11 guide_timings;
+     struct Guard {ID3D11Multithread* p;explicit Guard(ID3D11Multithread* v):p(v){p->Enter();}~Guard(){p->Leave();}};
+     struct Constants {unsigned depth_base[2]{},depth_size[2]{},motion_base[2]{},motion_size[2]{},size[2]{};
+-        float scale[2]{},jitter[2]{},pad[2]{},inset[4]{};};
+-    static constexpr char shaders[]=R"(
++        float scale[2]{},jitter[2]{};unsigned inputs{},wide_motion{};float inset[4]{};QuadFocusBlend blend{};};
++    static constexpr char shaders[]=CHEEKY_QUAD_BLEND_HLSL R"(
+ Texture2D<float> Depth:register(t0);Texture2D<float2> Motion:register(t1);
+ Texture2D<float> CenterDepth:register(t2);Texture2D<float2> CenterMotion:register(t3);
+ RWTexture2D<float> OutDepth:register(u0);RWTexture2D<float4> OutMotion:register(u1);
++RWTexture2D<float2> NativeMotion:register(u2);
+ cbuffer Params:register(b0){uint2 DepthBase;uint2 DepthSize;uint2 MotionBase;uint2 MotionSize;uint2 Size;
+- float2 Scale;float2 Jitter;float2 Pad;float4 Inset;};
+-[numthreads(8,8,1)]void Snapshot(uint3 id:SV_DispatchThreadID){
+- if(any(id.xy>=Size))return;float2 uv=(float2(id.xy)+.5)/Size;
+- OutDepth[id.xy]=Depth.Load(int3(DepthBase+min(uint2(uv*DepthSize),DepthSize-1),0));
++ float2 Scale;float2 Jitter;uint Inputs;uint WideMotion;float4 Inset;float4 Blend;};
++float2 snapshotMotion(float2 uv){
+  float2 mv=Motion.Load(int3(MotionBase+min(uint2(uv*MotionSize),MotionSize-1),0));
+- OutMotion[id.xy]=float4(all(isfinite(mv))&&all(abs(mv)<65504)?mv*Scale-Jitter:float2(65504,65504),0,0);
++ return all(isfinite(mv))&&all(abs(mv)<65504)?mv*Scale-Jitter:float2(65504,65504);
++}
++float atlasDepth(float2 uv,float2 local,bool center){
++ uint w,h;
++ if(center){
++  CenterDepth.GetDimensions(w,h);return CenterDepth.Load(int3(min(uint2(local*uint2(w,h)),uint2(w,h)-1),0));
++ }
++ Depth.GetDimensions(w,h);return Depth.Load(int3(min(uint2(uv*uint2(w,h)),uint2(w,h)-1),0));
+ }
+-[numthreads(8,8,1)]void Atlas(uint3 id:SV_DispatchThreadID){
+- if(any(id.xy>=Size))return;float2 uv=(float2(id.xy)+.5)/Size;float2 local=(uv-Inset.xy)/Inset.zw;
+- float depth;float2 mv;
+- if(all(local>=0)&&all(local<1)){
+-  uint w,h;CenterDepth.GetDimensions(w,h);depth=CenterDepth.Load(int3(min(uint2(local*uint2(w,h)),uint2(w,h)-1),0));
+-  CenterMotion.GetDimensions(w,h);mv=CenterMotion.Load(int3(min(uint2(local*uint2(w,h)),uint2(w,h)-1),0));
++float2 atlasMotion(float2 uv,float2 local,bool center){
++ uint w,h;
++ if(center&&!WideMotion){
++  CenterMotion.GetDimensions(w,h);float2 mv=CenterMotion.Load(int3(min(uint2(local*uint2(w,h)),uint2(w,h)-1),0));
+   if(all(abs(mv)<65504))mv*=Inset.zw;
+- }else{uint w,h;Depth.GetDimensions(w,h);depth=Depth.Load(int3(min(uint2(uv*uint2(w,h)),uint2(w,h)-1),0));
+-  Motion.GetDimensions(w,h);mv=Motion.Load(int3(min(uint2(uv*uint2(w,h)),uint2(w,h)-1),0));}
+- OutDepth[id.xy]=depth;OutMotion[id.xy]=float4(mv,0,0);
+-})";
+-    bool prepare(){
+-        if(snapshot_shader&&atlas_shader&&state&&constants)return true;
++  return mv;
++ }
++ Motion.GetDimensions(w,h);return Motion.Load(int3(min(uint2(uv*uint2(w,h)),uint2(w,h)-1),0));
++}
++void snapshot(uint2 id,bool native){
++ if(any(id>=Size))return;float2 uv=(float2(id)+.5)/Size;
++ [branch]if(!native||(Inputs&2))OutDepth[id]=Depth.Load(int3(DepthBase+min(uint2(uv*DepthSize),DepthSize-1),0));
++ if(native){[branch]if(Inputs&1)NativeMotion[id]=snapshotMotion(uv);}
++ else OutMotion[id]=float4(snapshotMotion(uv),0,0);
++}
++void atlas(uint2 id,bool native){
++ if(any(id>=Size))return;float2 uv=(float2(id)+.5)/Size;float2 local=(uv-Inset.xy)/Inset.zw;
++ bool center=all(local>=0)&&all(local<1);
++ if(Blend.z>=0)center=center&&quadFocusWeight(local,Inset.zw,Blend)>=0.5;
++ [branch]if(!native||(Inputs&2))OutDepth[id]=atlasDepth(uv,local,center);
++ if(native){[branch]if(Inputs&1)NativeMotion[id]=atlasMotion(uv,local,center);}
++ else OutMotion[id]=float4(atlasMotion(uv,local,center),0,0);
++}
++[numthreads(8,8,1)]void Snapshot(uint3 id:SV_DispatchThreadID){snapshot(id.xy,false);}
++[numthreads(8,8,1)]void Atlas(uint3 id:SV_DispatchThreadID){atlas(id.xy,false);}
++[numthreads(8,8,1)]void NativeSnapshot(uint3 id:SV_DispatchThreadID){snapshot(id.xy,true);}
++[numthreads(8,8,1)]void NativeAtlas(uint3 id:SV_DispatchThreadID){atlas(id.xy,true);}
++)";
++    bool prepare(bool native_only){
++        auto& snapshot=native_only?native_snapshot_shader:snapshot_shader;
++        auto& atlas=native_only?native_atlas_shader:atlas_shader;
++        if(snapshot&&atlas&&state&&constants)return true;
+         if(!state){Ptr<ID3D11Device1> device1;const auto level=device->GetFeatureLevel();
+             if(FAILED(context.As(&context1))||FAILED(device.As(&device1))||
+                FAILED(device1->CreateDeviceContextState(0,&level,1,D3D11_SDK_VERSION,__uuidof(ID3D11Device),nullptr,&state)))return false;}
+-        for(unsigned i=0;i<2;++i){auto& shader=i?atlas_shader:snapshot_shader;if(shader)continue;Ptr<ID3DBlob> code;
++        for(unsigned i=0;i<2;++i){auto& shader=i?atlas:snapshot;if(shader)continue;Ptr<ID3DBlob> code;
+             static_assert(fg::bytecode::source_hash(shaders)==fg::bytecode::quad_fg_source_hash);
+-            if(FAILED(i?fg::bytecode::blob(fg::bytecode::quad_fg_atlas_cs_5_0,&code):fg::bytecode::blob(fg::bytecode::quad_fg_snapshot_cs_5_0,&code))||
+-                FAILED(device->CreateComputeShader(code->GetBufferPointer(),code->GetBufferSize(),nullptr,&shader)))return false;}
++            const auto hr=native_only
++                ?(i?fg::bytecode::blob(fg::bytecode::quad_fg_nativeatlas_cs_5_0,&code):fg::bytecode::blob(fg::bytecode::quad_fg_nativesnapshot_cs_5_0,&code))
++                :(i?fg::bytecode::blob(fg::bytecode::quad_fg_atlas_cs_5_0,&code):fg::bytecode::blob(fg::bytecode::quad_fg_snapshot_cs_5_0,&code));
++            if(FAILED(hr)||FAILED(device->CreateComputeShader(code->GetBufferPointer(),code->GetBufferSize(),nullptr,&shader)))return false;}
+         if(!constants){D3D11_BUFFER_DESC b{};b.ByteWidth=sizeof(Constants);b.BindFlags=D3D11_BIND_CONSTANT_BUFFER;
+             if(FAILED(device->CreateBuffer(&b,nullptr,&constants)))return false;}
+         return true;
+     }
+-    bool allocate(Pair11& p,unsigned w,unsigned h,bool shared=false,ID3D12Device* d12=nullptr,Ptr<ID3D12Resource>* depth12=nullptr,Ptr<ID3D12Resource>* motion12=nullptr){
+-        if(p.depth&&p.width==w&&p.height==h&&(!shared||(depth12&&*depth12&&motion12&&*motion12)))return true;
++    bool allocate(Pair11& p,unsigned w,unsigned h,bool native_only,unsigned inputs,
++        ID3D12Device* d12=nullptr,Ptr<ID3D12Resource>* depth12=nullptr,Ptr<ID3D12Resource>* motion12=nullptr){
++        const bool shared=d12!=nullptr;
++        if(p.inputs==inputs&&p.native==native_only&&p.width==w&&p.height==h&&(!shared||(*depth12&&*motion12)))return true;
+         p={};if(depth12)depth12->Reset();if(motion12)motion12->Reset();
+         D3D11_TEXTURE2D_DESC d{};d.Width=w;d.Height=h;d.MipLevels=d.ArraySize=1;d.SampleDesc.Count=1;
+         d.BindFlags=D3D11_BIND_SHADER_RESOURCE|D3D11_BIND_UNORDERED_ACCESS;
+         if(shared)d.MiscFlags=D3D11_RESOURCE_MISC_SHARED_NTHANDLE|D3D11_RESOURCE_MISC_SHARED;
+         for(unsigned i=0;i<2;++i){auto& texture=i?p.motion:p.depth;auto& srv=i?p.motion_srv:p.depth_srv;auto& uav=i?p.motion_uav:p.depth_uav;
++            if(!(inputs&(i?cheeky_fg_game_motion:cheeky_fg_game_depth)))continue;
+             // RG32 sharing is rejected by the DCS adapter. Preserve both
+             // motion components at float32 precision in a shareable RGBA32.
+-            d.Format=i?DXGI_FORMAT_R32G32B32A32_FLOAT:DXGI_FORMAT_R32_FLOAT;
++            d.Format=i?(native_only?DXGI_FORMAT_R32G32_FLOAT:DXGI_FORMAT_R32G32B32A32_FLOAT):DXGI_FORMAT_R32_FLOAT;
+             if(FAILED(device->CreateTexture2D(&d,nullptr,&texture))||FAILED(device->CreateShaderResourceView(texture.Get(),nullptr,&srv))||
+                 FAILED(device->CreateUnorderedAccessView(texture.Get(),nullptr,&uav)))return false;
+             if(shared){Ptr<IDXGIResource1> resource;HANDLE handle{};
+@@ -99,7 +137,7 @@ cbuffer Params:register(b0){uint2 DepthBase;uint2 DepthSize;uint2 MotionBase;uin
+                 const auto hr=d12->OpenSharedHandle(handle,IID_PPV_ARGS(i?motion12->ReleaseAndGetAddressOf():depth12->ReleaseAndGetAddressOf()));CloseHandle(handle);
+                 if(FAILED(hr))return false;}
+         }
+-        p.width=w;p.height=h;return true;
++        p.width=w;p.height=h;p.inputs=inputs;p.native=native_only;return true;
+     }
+     // Caller holds a StateScope.
+     bool record(ID3D11ComputeShader* shader,const Constants& c,const std::array<ID3D11ShaderResourceView*,4>& srvs,Pair11& target){
+@@ -107,10 +145,11 @@ cbuffer Params:register(b0){uint2 DepthBase;uint2 DepthSize;uint2 MotionBase;uin
+         return guide_timings.measure(device.Get(),commands,interval,6,[&]{
+         commands->UpdateSubresource(constants.Get(),0,nullptr,&c,0,0);auto* cb=constants.Get();
+         commands->CSSetShader(shader,nullptr,0);commands->CSSetConstantBuffers(0,1,&cb);commands->CSSetShaderResources(0,4,srvs.data());
+-        ID3D11UnorderedAccessView* uavs[]{target.depth_uav.Get(),target.motion_uav.Get()};commands->CSSetUnorderedAccessViews(0,2,uavs,nullptr);
++        ID3D11UnorderedAccessView* uavs[]{target.depth_uav.Get(),target.native?nullptr:target.motion_uav.Get(),
++            target.native?target.motion_uav.Get():nullptr};commands->CSSetUnorderedAccessViews(0,3,uavs,nullptr);
+         commands->Dispatch((c.size[0]+7)/8,(c.size[1]+7)/8,1);
+-        ID3D11ShaderResourceView* empty[4]{};ID3D11UnorderedAccessView* empty_uav[2]{};
+-        commands->CSSetShaderResources(0,4,empty);commands->CSSetUnorderedAccessViews(0,2,empty_uav,nullptr);
++        ID3D11ShaderResourceView* empty[4]{};ID3D11UnorderedAccessView* empty_uav[3]{};
++        commands->CSSetShaderResources(0,4,empty);commands->CSSetUnorderedAccessViews(0,3,empty_uav,nullptr);
+         return true;});
+     }
+     bool execute(){return SUCCEEDED(device->GetDeviceRemovedReason());}
+@@ -119,90 +158,133 @@ public:
+         std::array<Ptr<ID3D11Texture2D>,2> depth,motion;
+         std::array<Ptr<ID3D11ShaderResourceView>,2> depth_srv,motion_srv;
+         std::array<CheekyFgEye,2> meta;
++        Ptr<IUnknown> lease;
+         bool valid{};
+     };
+     NativeResult build_native(const CheekyQuadViewsV1& roles,const XrCompositionLayerProjection& projection,
+-        const std::array<std::array<float,4>,2>& insets) {
+-        NativeResult result;if(!enabled||!protection||roles.status!=2||!roles.active)return result;
++        const std::array<std::array<float,4>,2>& insets,
++        const std::array<QuadFocusBlend,2>& blends = {original_quad_blend, original_quad_blend},
++        const std::array<std::array<float,2>,2>& stable_sizes = {},
++        bool use_wide_motion=true,uint32_t stereo_key=0) {
++        NativeResult result;if(mode!=native||!protection||roles.status!=2||!roles.active)return result;
+         Guard guard(protection.Get());std::lock_guard lock(mutex);
+         std::array<Source*,4> selected{};
+         for(unsigned i=0;i<4;++i){const auto& role=roles.views[i];
+             for(auto& source:sources)if(source.id==role.dlss_view&&source.generation==role.registration_generation)selected[i]=&source;
+             const auto* source=selected[i];
+-            if(!source||source->interval!=interval||source->evaluations!=1||
++            if(!source||!source->image.native||source->interval!=interval||source->evaluations!=1||
+                 source->metadata.meta.width!=unsigned(projection.views[i].subImage.imageRect.extent.width)||
+                 source->metadata.meta.height!=unsigned(projection.views[i].subImage.imageRect.extent.height))return result;
+-            if(i&&(source->metadata.meta.configuration!=selected[0]->metadata.meta.configuration||
++            if(i&&(source->image.inputs!=selected[0]->image.inputs||source->metadata.meta.configuration!=selected[0]->metadata.meta.configuration||
+                 source->metadata.meta.depth_inverted!=selected[0]->metadata.meta.depth_inverted))return result;
+         }
++        // Deferred native draws retain the frame lease. Only a pool-owned slot
++        // can be overwritten; earlier submitted reads share this immediate context.
++        std::shared_ptr<Frame> frame;
++        for(auto& slot:frames){if(!slot)slot=std::make_shared<Frame>();if(slot.use_count()==1){frame=slot;break;}}
++        if(!frame)return result;
++        // A retired DX12 atlas may occupy this slot after a backend switch.
++        // Drop its shared aliases before creating the native-only allocation.
++        if(frame->depth[0]||frame->depth[1])*frame={};
++        auto& target=frame->image;
++        const auto inputs=selected[0]->image.inputs;
+         auto configuration=selected[0]->metadata.meta.configuration^roles.revision;
+-        std::array<Pair11,2> target;
++        if(stereo_key)configuration=(configuration^stereo_key^unsigned(use_wide_motion))*1099511628211ull;
+         for(unsigned eye=0;eye<2;++eye){const auto& inset=insets[eye];
+             for(float value:inset)if(!std::isfinite(value))return result;
+             if(inset[2]<=0||inset[3]<=0||inset[0]<0||inset[1]<0||inset[0]+inset[2]>1.001f||inset[1]+inset[3]>1.001f)return result;
+-            const unsigned w=std::max(selected[eye]->image.width,unsigned(std::ceil(selected[eye+2]->image.width/inset[2]))),
+-                h=std::max(selected[eye]->image.height,unsigned(std::ceil(selected[eye+2]->image.height/inset[3])));
+-            if(w>16384||h>16384||!allocate(target[eye],w,h))return result;
++            // Use stable guide dimensions without hashing the per-frame projection.
++            const auto& stable_size=stable_sizes[eye];
++            const float fw=stable_size[0]>0.f?stable_size[0]:inset[2],fh=stable_size[0]>0.f?stable_size[1]:inset[3];
++            const unsigned w=std::max(selected[eye]->image.width,unsigned(std::ceil(selected[eye+2]->image.width/fw))),
++                h=std::max(selected[eye]->image.height,unsigned(std::ceil(selected[eye+2]->image.height/fh)));
++            if(w>16384||h>16384||!allocate(target[eye],w,h,true,inputs))return result;
+             configuration=(configuration^w^(uint64_t(h)<<32))*1099511628211ull;
+-            for(float value:inset)configuration=(configuration^std::bit_cast<unsigned>(value))*1099511628211ull;
++            if(stable_size[0]>0.f) {
++                configuration=(configuration^std::bit_cast<unsigned>(fw))*1099511628211ull;
++                configuration=(configuration^std::bit_cast<unsigned>(fh))*1099511628211ull;
++            } else for(float value:inset)configuration=(configuration^std::bit_cast<unsigned>(value))*1099511628211ull;
++            if(blends[eye][2]>=0)for(float value:blends[eye])configuration=(configuration^std::bit_cast<unsigned>(value))*1099511628211ull;
+             for(unsigned part:{eye,eye+2})configuration=(configuration^selected[part]->id^selected[part]->generation)*1099511628211ull;
+         }
+         const bool reset=configuration!=last_configuration||last_built_interval+1!=interval;
+-        if(!prepare())return result;
++        if(!prepare(true))return result;
+         {StateScope scope{*this};
+         for(unsigned eye=0;eye<2;++eye){const auto& outer=selected[eye]->image;const auto& center=selected[eye+2]->image;
+-            Constants c;c.size[0]=target[eye].width;c.size[1]=target[eye].height;std::copy(insets[eye].begin(),insets[eye].end(),c.inset);
+-            record(atlas_shader.Get(),c,{outer.depth_srv.Get(),outer.motion_srv.Get(),center.depth_srv.Get(),center.motion_srv.Get()},target[eye]);
++            Constants c;c.size[0]=target[eye].width;c.size[1]=target[eye].height;c.inputs=inputs;std::copy(insets[eye].begin(),insets[eye].end(),c.inset);c.blend=blends[eye];
++            // The wide view stays in a fixed projection as the center moves.
++            c.wide_motion=use_wide_motion&&stable_sizes[eye][0]>0.f;
++            record(native_atlas_shader.Get(),c,{outer.depth_srv.Get(),outer.motion_srv.Get(),center.depth_srv.Get(),center.motion_srv.Get()},target[eye]);
+             auto& g=result.meta[eye];g=selected[eye+2]->metadata.meta;g.depth=g.motion=g.peripheral_depth=g.peripheral_motion=nullptr;
+-            g.focus_width=insets[eye][2];g.focus_height=insets[eye][3];
+-            g.focus_x=insets[eye][0]+g.focus_width*.5f-.5f;g.focus_y=insets[eye][1]+g.focus_height*.5f-.5f;
+-            g.focus_feather=2.f/std::min(target[eye].width,target[eye].height);g.configuration=configuration;
++            g.focus_width=g.focus_height=1.f;g.focus_x=g.focus_y=g.focus_feather=0.f;
++            g.resolution_percent=100;g.show_foveation_border=0;g.configuration=configuration;
+             g.reset=reset||selected[eye]->metadata.meta.reset||selected[eye+2]->metadata.meta.reset;
+             result.depth[eye]=target[eye].depth;result.motion[eye]=target[eye].motion;
+             result.depth_srv[eye]=target[eye].depth_srv;result.motion_srv[eye]=target[eye].motion_srv;
+         }}
+         if(!execute())return {};
++        result.lease.Attach(new Lease(std::move(frame)));
+         last_configuration=configuration;last_built_interval=interval;result.valid=true;atlas_ready=true;++diagnostics.guide_pairs;return result;
+     }
+     struct Result {CheekyFgPair pair;Ptr<IUnknown> lease;};
++    bool precompose{true}; // DX12 FG selects whole-eye or legacy raw-plane metadata.
+     explicit QuadFg11(ID3D11Device* d):device(d){device->GetImmediateContext(&context);context.As(&protection);
+         if(protection)protection->SetMultithreadProtected(TRUE);}
+-    void enable(bool e){if(enabled.exchange(e)!=e)guide_timings.reset();if(!e)atlas_ready=false;}
+-    bool ready()const noexcept{return enabled&&atlas_ready;}
++    void enable(bool e,bool native_only=false){
++        const auto next=e?(native_only?native:bridged):disabled;
++        if(mode.exchange(next)!=next){guide_timings.reset();atlas_ready=false;}
++    }
++    bool ready()const noexcept{return mode!=disabled&&atlas_ready;}
+     cheeky::gpu::Summary guide_cost() const {return guide_timings.summary();}
+-    CheekyQuadFgStatsV1 stats(){std::lock_guard lock(mutex);auto value=diagnostics;value.enabled=enabled;return value;}
++    CheekyQuadFgStatsV1 stats(){std::lock_guard lock(mutex);auto value=diagnostics;value.enabled=mode!=disabled;return value;}
+     void finish(){if(!protection)return;Guard guard(protection.Get());std::lock_guard lock(mutex);guide_timings.collect(context.Get());++interval;
+-        if(!enabled){sources={};frames={};last_configuration=last_built_interval=0;}}
++        if(mode==disabled){sources={};frames={};last_configuration=last_built_interval=0;}}
++    void forget(uint64_t id,uint64_t generation){
++        std::lock_guard lock(mutex);
++        const auto source=std::find_if(sources.begin(),sources.end(),[&](const auto& s){return s.id==id&&s.generation==generation;});
++        if(source!=sources.end())*source={};
++    }
++    unsigned input_mask(unsigned center_method)const noexcept{return input_mask(mode.load(),center_method);}
+     bool observe(const CheekyQuadFgSourceV1& input){
+-        if(!enabled||!protection||input.context!=context.Get()||!input.meta.feature||!input.generation||!input.depth||!input.motion)return false;
+-        Guard guard(protection.Get());std::lock_guard lock(mutex);++diagnostics.observations;diagnostics.capture_stage=1;if(!prepare())return false;
++        const auto capture_mode=mode.load();
++        if(!protection||input.context!=context.Get()||!input.meta.feature||!input.generation)return false;
++        const bool native_only=capture_mode==native;
++        const auto& g=input.meta;
++        const unsigned inputs=input_mask(capture_mode,g.center_method);
++        if(!inputs)return false;
++        Guard guard(protection.Get());std::lock_guard lock(mutex);++diagnostics.observations;diagnostics.capture_stage=1;if(!prepare(native_only))return false;
+         diagnostics.capture_stage=2;
+         auto* depth=static_cast<ID3D11Texture2D*>(input.depth);auto* motion=static_cast<ID3D11Texture2D*>(input.motion);
+-        D3D11_TEXTURE2D_DESC dd{},md{};depth->GetDesc(&dd);motion->GetDesc(&md);
+-        if(dd.ArraySize!=1||md.ArraySize!=1||dd.SampleDesc.Count!=1||md.SampleDesc.Count!=1)return false;
+-        const auto& g=input.meta;
+-        diagnostics.capture_stage=3;
+-        const auto bounds=[](unsigned base,unsigned size,unsigned total){return size&&uint64_t(base)+size<=total;};
+-        if(!bounds(g.depth_base_x,g.depth_width,dd.Width)||!bounds(g.depth_base_y,g.depth_height,dd.Height)||
+-            !bounds(g.motion_base_x,g.motion_width,md.Width)||!bounds(g.motion_base_y,g.motion_height,md.Height))return false;
+-        diagnostics.capture_stage=4;const auto df=cheeky::fg::guide_depth_format(dd.Format),mf=cheeky::fg::guide_motion_format(md.Format);
+-        if(df==DXGI_FORMAT_UNKNOWN||mf==DXGI_FORMAT_UNKNOWN)return false;
++        const bool need_depth=(inputs&cheeky_fg_game_depth)!=0,need_motion=(inputs&cheeky_fg_game_motion)!=0;
++        const auto describe=[](ID3D11Texture2D* texture,unsigned x,unsigned y,unsigned width,unsigned height,DXGI_FORMAT& format){
++            if(!texture)return false;
++            D3D11_TEXTURE2D_DESC desc{};texture->GetDesc(&desc);format=desc.Format;
++            return desc.ArraySize==1&&desc.SampleDesc.Count==1&&width&&height&&uint64_t(x)+width<=desc.Width&&uint64_t(y)+height<=desc.Height;
++        };
++        DXGI_FORMAT depth_format{},motion_format{};
++        if(need_depth&&!describe(depth,g.depth_base_x,g.depth_base_y,g.depth_width,g.depth_height,depth_format))return false;
++        if(need_motion&&!describe(motion,g.motion_base_x,g.motion_base_y,g.motion_width,g.motion_height,motion_format))return false;
++        diagnostics.capture_stage=4;
++        const auto df=cheeky::fg::guide_depth_format(depth_format),mf=cheeky::fg::guide_motion_format(motion_format);
++        if((need_depth&&df==DXGI_FORMAT_UNKNOWN)||(need_motion&&mf==DXGI_FORMAT_UNKNOWN))return false;
+         auto source=std::find_if(sources.begin(),sources.end(),[&](const auto& s){return s.id==g.feature;});
+         if(source==sources.end())source=std::find_if(sources.begin(),sources.end(),[](const auto& s){return !s.id;});
+         if(source==sources.end())source=std::min_element(sources.begin(),sources.end(),[](const auto& a,const auto& b){return a.interval<b.interval;});
+         bool reset=g.reset||source->id!=g.feature||source->generation!=input.generation||source->interval+1!=interval;
+-        diagnostics.capture_stage=5;if(!allocate(source->image,g.depth_width,g.depth_height))return false;
++        diagnostics.capture_stage=5;if(!allocate(source->image,g.depth_width,g.depth_height,native_only,inputs))return false;
+         diagnostics.capture_stage=6;
+         Ptr<ID3D11ShaderResourceView> ds,ms;D3D11_SHADER_RESOURCE_VIEW_DESC view{};view.ViewDimension=D3D11_SRV_DIMENSION_TEXTURE2D;view.Texture2D.MipLevels=1;
+-        view.Format=df;if(FAILED(device->CreateShaderResourceView(depth,&view,&ds)))return false;
+-        view.Format=mf;if(FAILED(device->CreateShaderResourceView(motion,&view,&ms)))return false;
++        view.Format=df;if(need_depth&&FAILED(device->CreateShaderResourceView(depth,&view,&ds)))return false;
++        view.Format=mf;if(need_motion&&FAILED(device->CreateShaderResourceView(motion,&view,&ms)))return false;
+         Constants c;c.depth_base[0]=g.depth_base_x;c.depth_base[1]=g.depth_base_y;c.depth_size[0]=g.depth_width;c.depth_size[1]=g.depth_height;
+         c.motion_base[0]=g.motion_base_x;c.motion_base[1]=g.motion_base_y;c.motion_size[0]=g.motion_width;c.motion_size[1]=g.motion_height;
+-        c.size[0]=g.depth_width;c.size[1]=g.depth_height;c.scale[0]=g.motion_scale_x/g.motion_width;c.scale[1]=g.motion_scale_y/g.motion_height;
+-        if(g.motion_jittered){if(!reset&&source->metadata.meta.motion_jittered){
++        c.size[0]=g.depth_width;c.size[1]=g.depth_height;c.inputs=inputs;
++        if(need_motion){c.scale[0]=g.motion_scale_x/g.motion_width;c.scale[1]=g.motion_scale_y/g.motion_height;}
++        if(need_motion&&g.motion_jittered){if(!reset&&source->metadata.meta.motion_jittered){
+             c.jitter[0]=(source->metadata.meta.jitter_x-g.jitter_x)/g.motion_width;c.jitter[1]=(source->metadata.meta.jitter_y-g.jitter_y)/g.motion_height;
+         }else reset=true;}
+-        diagnostics.capture_stage=7;{StateScope scope{*this};record(snapshot_shader.Get(),c,{ds.Get(),ms.Get(),nullptr,nullptr},source->image);}
++        diagnostics.capture_stage=7;{StateScope scope{*this};
++            record(native_only?native_snapshot_shader.Get():snapshot_shader.Get(),c,{ds.Get(),ms.Get(),nullptr,nullptr},source->image);}
+         if(!execute())return false;
+         source->evaluations=source->interval==interval?source->evaluations+1:1;
+         source->id=g.feature;source->generation=input.generation;source->interval=interval;source->metadata=input;
+@@ -210,8 +292,10 @@ public:
+     }
+     Result build(const CheekyQuadViewsV1& roles,const XrCompositionLayerProjection& projection,
+         const std::array<unsigned,2>& widths,const std::array<unsigned,2>& heights,
+-        const std::array<std::array<float,4>,2>& insets,cheeky::fg::D3D11Bridge& bridge){
+-        Result result;atlas_ready=false;if(!enabled||!protection||roles.status!=2||!roles.active)return result;
++        const std::array<std::array<float,4>,2>& insets,cheeky::fg::D3D11Bridge& bridge,
++        const std::array<QuadFocusBlend,2>& blends,const std::array<std::array<float,2>,2>& stable_sizes = {},
++        bool use_wide_motion=true,uint32_t stereo_key=0){
++        Result result;atlas_ready=false;if(mode!=bridged||!protection||roles.status!=2||!roles.active)return result;
+         // Bridge methods take their mutex before entering the immediate context.
+         // Bridge upload waits retire outside this mutex. Brief CPU contention
+         // must not discard a valid four-view interval and reset FG history.
+@@ -220,7 +304,7 @@ public:
+         ++diagnostics.frames;diagnostics.assembly_stage=1;
+         std::array<Source*,4> selected{};
+         for(unsigned i=0;i<4;++i){const auto& role=roles.views[i];for(auto& s:sources)if(s.id==role.dlss_view&&s.generation==role.registration_generation)selected[i]=&s;
+-            const auto* s=selected[i];if(!s||s->interval!=interval||s->evaluations!=1||s->metadata.meta.width!=unsigned(projection.views[i].subImage.imageRect.extent.width)||
++            const auto* s=selected[i];if(!s||s->image.native||s->interval!=interval||s->evaluations!=1||s->metadata.meta.width!=unsigned(projection.views[i].subImage.imageRect.extent.width)||
+                 s->metadata.meta.height!=unsigned(projection.views[i].subImage.imageRect.extent.height))return result;
+             if(i&&(s->metadata.meta.configuration!=selected[0]->metadata.meta.configuration||s->metadata.meta.depth_inverted!=selected[0]->metadata.meta.depth_inverted))return result;}
+         std::shared_ptr<Frame> frame;
+@@ -228,28 +312,45 @@ public:
+         if(!frame)return result;
+         diagnostics.assembly_stage=2;
+         auto configuration=selected[0]->metadata.meta.configuration^roles.revision;
++        if(stereo_key)configuration=(configuration^stereo_key^unsigned(use_wide_motion))*1099511628211ull;
+         for(unsigned eye=0;eye<2;++eye){const auto& inset=insets[eye];
+             for(const auto f:inset)if(!std::isfinite(f))return result;
+             if(inset[2]<=0||inset[3]<=0||inset[0]<0||inset[1]<0||inset[0]+inset[2]>1.001f||inset[1]+inset[3]>1.001f)return result;
+-            const unsigned w=std::max(selected[eye]->image.width,unsigned(std::ceil(selected[eye+2]->image.width/inset[2]))),
+-                h=std::max(selected[eye]->image.height,unsigned(std::ceil(selected[eye+2]->image.height/inset[3])));
+-            if(!w||!h||w>16384||h>16384||!allocate(frame->image[eye],w,h,true,bridge.device12.Get(),&frame->depth[eye],&frame->motion[eye]))return result;
++            // Use stable guide dimensions without hashing the per-frame projection.
++            const auto& stable_size=stable_sizes[eye];
++            const float fw=stable_size[0]>0.f?stable_size[0]:inset[2],fh=stable_size[0]>0.f?stable_size[1]:inset[3];
++            const unsigned w=std::max(selected[eye]->image.width,unsigned(std::ceil(selected[eye+2]->image.width/fw))),
++                h=std::max(selected[eye]->image.height,unsigned(std::ceil(selected[eye+2]->image.height/fh)));
++            if(!w||!h||w>16384||h>16384||!allocate(frame->image[eye],w,h,false,all_guides,bridge.device12.Get(),&frame->depth[eye],&frame->motion[eye]))return result;
+             configuration=(configuration^w^uint64_t(h)<<32)*1099511628211ull;
+-            for(const auto f:inset)configuration=(configuration^std::bit_cast<unsigned>(f))*1099511628211ull;
++            if(stable_size[0]>0.f) {
++                configuration=(configuration^std::bit_cast<unsigned>(fw))*1099511628211ull;
++                configuration=(configuration^std::bit_cast<unsigned>(fh))*1099511628211ull;
++            } else for(float value:inset)configuration=(configuration^std::bit_cast<unsigned>(value))*1099511628211ull;
++            if(blends[eye][2]>=0)for(float value:blends[eye])configuration=(configuration^std::bit_cast<unsigned>(value))*1099511628211ull;
+         }
+         bool reset=configuration!=last_configuration||last_built_interval+1!=interval;
+-        if(!prepare())return result;
++        if(!prepare(false))return result;
+         {StateScope scope{*this};
+         for(unsigned eye=0;eye<2;++eye){auto& target=frame->image[eye];const auto& outer=selected[eye]->image;const auto& center=selected[eye+2]->image;
+-            Constants c;c.size[0]=target.width;c.size[1]=target.height;std::copy(insets[eye].begin(),insets[eye].end(),c.inset);
++            Constants c;c.size[0]=target.width;c.size[1]=target.height;std::copy(insets[eye].begin(),insets[eye].end(),c.inset);c.blend=blends[eye];
++            // The wide view stays in a fixed projection as the center moves.
++            c.wide_motion=use_wide_motion&&stable_sizes[eye][0]>0.f;
+             record(atlas_shader.Get(),c,{outer.depth_srv.Get(),outer.motion_srv.Get(),center.depth_srv.Get(),center.motion_srv.Get()},target);
+             auto& g=result.pair.eyes[eye];g=selected[eye+2]->metadata.meta;g.depth=frame->depth[eye].Get();g.motion=frame->motion[eye].Get();
+             g.width=widths[eye];g.height=heights[eye];g.depth_width=g.motion_width=target.width;g.depth_height=g.motion_height=target.height;
+             g.depth_base_x=g.depth_base_y=g.motion_base_x=g.motion_base_y=0;g.motion_scale_x=float(target.width);g.motion_scale_y=float(target.height);
+             g.jitter_x=g.jitter_y=g.jitter_correction_x=g.jitter_correction_y=0;g.motion_jittered=0;g.prepared_guides=0;
+-            g.focus_width=insets[eye][2];g.focus_height=insets[eye][3];g.focus_x=insets[eye][0]+g.focus_width*.5f-.5f;g.focus_y=insets[eye][1]+g.focus_height*.5f-.5f;
+-            g.focus_feather=2.f/std::min(widths[eye],heights[eye]);
+-            if(g.peripheral_method==0)g.peripheral_method=2;g.peripheral_depth=g.peripheral_motion=nullptr;
++            if(precompose){
++                g.focus_width=g.focus_height=1.f;g.focus_x=g.focus_y=g.focus_feather=0.f;
++                g.resolution_percent=100;g.show_foveation_border=0;
++            }else{
++                g.focus_width=insets[eye][2];g.focus_height=insets[eye][3];
++                g.focus_x=insets[eye][0]+g.focus_width*.5f-.5f;g.focus_y=insets[eye][1]+g.focus_height*.5f-.5f;
++                g.focus_feather=2.f/std::min(widths[eye],heights[eye]);
++                if(g.peripheral_method==0)g.peripheral_method=2;
++            }
++            g.peripheral_depth=g.peripheral_motion=nullptr;
+             g.reset=reset||selected[eye]->metadata.meta.reset||selected[eye+2]->metadata.meta.reset;g.configuration=configuration;
+         }}
+         diagnostics.assembly_stage=3;if(!execute()||!bridge.from11())return {};
+diff --git a/openxr_layer/quad_head_focus.hpp b/openxr_layer/quad_head_focus.hpp
+new file mode 100644
+index 0000000..d804462
+--- /dev/null
++++ b/openxr_layer/quad_head_focus.hpp
+@@ -0,0 +1,62 @@
++#pragma once
++#include "../shared/quad_focus.hpp"
++#include <openxr/openxr.h>
++#include <array>
++#include <cmath>
++#include <numbers>
++
++namespace cheeky::quad_capture {
++
++using FocusShift = std::array<float,2>;
++
++class HeadFocus {
++    FocusShift reference{};
++    XrTime time{};
++    XrSpace space{};
++    std::uint64_t revision{};
++    FocusShift shift{};
++
++    static float difference(float value, float reference) {
++        return std::remainder(value-reference,360.f);
++    }
++    static float deadzone(float value,float radius) {
++        return std::copysign(std::max(0.f,std::abs(value)-radius),value);
++    }
++    static FocusShift angles(const std::array<XrView,2>& views) {
++        // Average the forward directions so canted eye poses share one target.
++        float x=0.f,y=0.f,z=0.f;
++        for (const auto& view:views) {
++            const auto& q=view.pose.orientation;
++            x-=2.f*(q.x*q.z+q.w*q.y);
++            y+=2.f*(q.w*q.x-q.y*q.z);
++            z+=2.f*(q.x*q.x+q.y*q.y)-1.f;
++        }
++        constexpr float degrees=180.f/std::numbers::pi_v<float>;
++        return {std::atan2(x,-z)*degrees,std::atan2(y,std::hypot(x,z))*degrees};
++    }
++
++public:
++    FocusShift update(const std::array<XrView,2>& views,const XrViewLocateInfo& info,
++        const QuadFocusSettings& settings,std::uint64_t next_revision) {
++        if (!settings.head_offset) {
++            *this={};
++            return {};
++        }
++        const std::array params{settings.horizontal,settings.vertical};
++        const auto current=angles(views);
++        const bool rebase=!time||space!=info.space||revision!=next_revision;
++        if (!rebase&&info.displayTime<=time) return shift;
++        if (rebase) reference=current;
++        for (unsigned axis=0;axis<2;++axis) {
++            const auto& p=params[axis];
++            const float relative=deadzone(difference(current[axis],reference[axis]),p.deadzone);
++            shift[axis]=p.bias+relative*p.angle_gain;
++        }
++        time=info.displayTime;
++        space=info.space;
++        revision=next_revision;
++        return shift;
++    }
++};
++
++} // namespace cheeky::quad_capture
+diff --git a/shared/cheeky_quad_fg.hpp b/shared/cheeky_quad_fg.hpp
+index 0a96b0e..21cf90f 100644
+--- a/shared/cheeky_quad_fg.hpp
++++ b/shared/cheeky_quad_fg.hpp
+@@ -10,6 +10,7 @@ struct CheekyQuadFgSourceV1 {
+     unsigned queue_priority{2},release_point{3};
+ };
+ using CheekyQuadFgObserveFn=bool(__cdecl*)(const CheekyQuadFgSourceV1*);
++using CheekyQuadFgInputMaskFn=unsigned(__cdecl*)(unsigned center_method);
+ struct CheekyQuadFgStatsV1 {
+     unsigned abi{1},size{sizeof(CheekyQuadFgStatsV1)},enabled{},capture_stage{},assembly_stage{};
+     unsigned long long observations{},snapshots{},frames{},guide_pairs{};
+diff --git a/shared/cheeky_quad_views.h b/shared/cheeky_quad_views.h
+index 5fbb34e..92e5f87 100644
+--- a/shared/cheeky_quad_views.h
++++ b/shared/cheeky_quad_views.h
+@@ -29,6 +29,12 @@ typedef struct CheekyQuadSourceD3D11V1 {
+     uint32_t x, y, width, height, array_slice;
+ } CheekyQuadSourceD3D11V1;
+ typedef uint32_t(__cdecl* CheekyQuadGetViewsV1Fn)(CheekyQuadViewsV1*);
++typedef struct CheekyQuadQualitySampleV1 {
++    uint64_t recorded_ms; // std::chrono::steady_clock epoch in milliseconds.
++    double output_percent, gpu_load;
++} CheekyQuadQualitySampleV1;
++typedef uint32_t(__cdecl* CheekyQuadAutomaticQualityV1Fn)();
++typedef void(__cdecl* CheekyQuadGetQualitySampleV1Fn)(uint64_t, CheekyQuadQualitySampleV1*);
+ typedef uint32_t(__cdecl* CheekyQuadObserveD3D11V1Fn)(const CheekyQuadSourceD3D11V1*);
+ typedef void(__cdecl* CheekyQuadForgetSourceV1Fn)(uint64_t, uint64_t);
+ typedef void(__cdecl* CheekyQuadRecalibrateV1Fn)();
+diff --git a/shared/quad_blend_shader.hpp b/shared/quad_blend_shader.hpp
+new file mode 100644
+index 0000000..c69518c
+--- /dev/null
++++ b/shared/quad_blend_shader.hpp
+@@ -0,0 +1,18 @@
++#pragma once
++
++// Keep color, projected UI and geometry guides on the same focus boundary.
++#define CHEEKY_QUAD_BLEND_HLSL R"HLSL(
++float quadFocusDistance(float2 local, float2 size, float radius) {
++    float2 q = abs(local - 0.5) * size - size * 0.5 + radius;
++    return radius - (length(max(q, 0.0)) + min(max(q.x, q.y), 0.0));
++}
++float quadFocusWeight(float2 local, float2 insetSize, float4 blend) {
++    float2 size = insetSize * blend.xy;
++    if (blend.z < 0.0) {
++        float2 edge = min(local, 1.0 - local) * size;
++        return saturate(min(edge.x, edge.y) * 0.5);
++    }
++    float inside = quadFocusDistance(local, size, blend.z);
++    return blend.w > 0.0 ? smoothstep(0.0, blend.w, inside) : step(0.0, inside);
++}
++)HLSL"
+diff --git a/shared/quad_focus.hpp b/shared/quad_focus.hpp
+new file mode 100644
+index 0000000..44b3942
+--- /dev/null
++++ b/shared/quad_focus.hpp
+@@ -0,0 +1,35 @@
++#pragma once
++#include <algorithm>
++#include <array>
++#include <cstdint>
++
++struct QuadFocusAxis {
++    float bias{};
++    float angle_gain{.15f};
++    float deadzone{1.f};
++};
++
++inline constexpr float quad_focus_min_distance_m=.25f,quad_focus_max_distance_m=10.f;
++inline constexpr float quad_focus_max_bias_deg=45.f;
++
++struct QuadFocusSettings {
++    bool custom_blend{};
++    std::uint32_t width{50}, height{50};
++    std::uint32_t radius{10}, feather{10};
++    bool color_match{};
++    bool head_offset{};
++    bool match_stereo_borders{};
++    QuadFocusAxis horizontal, vertical;
++    float stereo_distance_m{1.f};
++};
++using QuadFocusBlend = std::array<float,4>;
++inline constexpr QuadFocusBlend original_quad_blend{0.f,0.f,-1.f,0.f};
++
++// xy are the output dimensions in pixels; zw are radius and feather in pixels.
++// A negative radius selects the original two-pixel linear blend.
++inline QuadFocusBlend quad_focus_blend(const QuadFocusSettings& settings,
++    const std::array<float,4>& inset, unsigned width, unsigned height) noexcept {
++    const auto short_side = std::min(inset[2]*width,inset[3]*height);
++    return {float(width),float(height),settings.custom_blend?settings.radius*.01f*short_side:-1.f,
++        settings.feather*.01f*short_side};
++}
+diff --git a/tests/openxr_binding/quad_capture_d3d11_validation.hpp b/tests/openxr_binding/quad_capture_d3d11_validation.hpp
+index d660579..a744666 100644
+--- a/tests/openxr_binding/quad_capture_d3d11_validation.hpp
++++ b/tests/openxr_binding/quad_capture_d3d11_validation.hpp
+@@ -43,7 +43,91 @@ XrResult XRAPI_CALL quad11_end(XrSession,const XrFrameEndInfo* info) {
+         check(v.next==nullptr&&v.subImage.imageArrayIndex==0&&!quad11_chains.at(v.subImage.swapchain).acquired,"Quad11 output metadata/release");}
+     return XR_SUCCESS;
+ }
++void check_quad_head_focus() {
++    using namespace cheeky::quad_capture;
++    HeadFocus tracking;
++    QuadFocusSettings settings;
++    settings.head_offset=true;
++    settings.horizontal.angle_gain=settings.vertical.angle_gain=.25f;
++    XrViewLocateInfo info{XR_TYPE_VIEW_LOCATE_INFO};
++    info.displayTime=1;
++    std::array<XrView,2> views{};
++    for(auto& view:views){
++        view.pose.orientation.w=1.f;
++        view.fov={-.7f,.7f,.7f,-.7f};
++    }
++    check(tracking.update(views,info,settings,0)==FocusShift{},"Head focus starts centered");
++    const float yaw=-.2f,pitch=-.2f;
++    const XrQuaternionf turned{std::sin(pitch)*std::cos(yaw),std::sin(yaw)*std::cos(pitch),
++        -std::sin(pitch)*std::sin(yaw),std::cos(yaw)*std::cos(pitch)};
++    for(auto& view:views)view.pose.orientation=turned;
++    info.displayTime+=100'000'000;
++    const auto moving=tracking.update(views,info,settings,0);
++    check(moving[0]>4.f&&moving[1]<-4.f,"Head focus maps signed pitch and yaw");
++    HeadFocus slower;
++    auto late=info;
++    late.displayTime=1;
++    for(auto& view:views)view.pose.orientation={0,0,0,1};
++    slower.update(views,late,settings,0);
++    for(auto& view:views)view.pose.orientation=turned;
++    late.displayTime+=500'000'000;
++    check(slower.update(views,late,settings,0)==moving,"Head focus responds to angle independently of turn duration");
++    info.displayTime+=2'000'000'000;
++    const auto still=tracking.update(views,info,settings,0);
++    check(still==moving,"Both focus offsets hold when the head stops");
++    info.displayTime+=100'000'000;
++    check(tracking.update(views,info,settings,1)==FocusShift{},"Manual recenter resets both axes");
++    const auto wide_turn=fit_focus_shift(views,settings,{160.f,-160.f});
++    check(wide_turn[0]>0.f&&wide_turn[1]<0.f,"Large offsets clamp to the matching viewport edge");
++    settings.width=100;
++    const auto shift=fit_focus_shift(views,settings,{20.f,8.f});
++    check(shift[0]==0.f&&shift[1]>0.f,"A full-width focus can still move vertically");
++
++    views[0].fov={-.94f,.70f,.77f,-.96f};
++    views[1].fov={-.70f,.89f,.76f,-.93f};
++    views[0].pose={{0,0,0,1},{-.032f,0,0}};
++    views[1].pose={{0,0,0,1},{.032f,0,0}};
++    const auto plane=[](const XrFovf& fov,float x) {
++        return std::array{x+std::tan(fov.angleLeft),x+std::tan(fov.angleRight),
++            std::tan(fov.angleDown),std::tan(fov.angleUp)};
++    };
++    LocatedFocus focus{};
++    focus.settings.width=focus.settings.height=25;
++    locate_focus(focus,views);
++    check(focus.eyes[0].angleRight!=focus.eyes[1].angleRight,"Independent focus uses each eye's FOV");
++    const auto independentLeft=plane(focus.eyes[0],-.032f),independentRight=plane(focus.eyes[1],.032f);
++    focus.settings.match_stereo_borders=true;
++    locate_focus(focus,views);
++    for(unsigned eye=0;eye<2;++eye) {
++        const auto projected=plane(focus.eyes[eye],views[eye].pose.position.x);
++        for(unsigned edge=0;edge<4;++edge) {
++            const auto expected=edge%2?std::max(independentLeft[edge],independentRight[edge]):
++                std::min(independentLeft[edge],independentRight[edge]);
++            check(std::abs(projected[edge]-expected)<1e-6f,"Stereo focus covers the union on the depth plane");
++        }
++    }
++    check(focus.eyes[0].angleLeft!=focus.eyes[1].angleLeft,"Stereo focus accounts for the distance between eye origins");
++    const auto sizes=focus.sizes;
++    focus.settings.head_offset=true;
++    focus.shift={160.f,-160.f};
++    locate_focus(focus,views);
++    const auto& a=focus.eyes[0];const auto& b=focus.eyes[1];
++    const auto pa=plane(a,-.032f),pb=plane(b,.032f);
++    for(unsigned edge=0;edge<4;++edge)
++        check(std::abs(pa[edge]-pb[edge])<1e-6f,"Stereo focus shares all four plane edges during a head turn");
++    check(std::abs(a.angleRight-views[0].fov.angleRight)<1e-6f&&
++        std::abs(a.angleDown-views[1].fov.angleDown)<1e-6f&&focus.sizes==sizes,
++        "Stereo focus stops at the common boundary without changing atlas size");
++    focus.settings.head_offset=false;
++    focus.shift={};
++    focus.settings.stereo_distance_m=2.f;
++    locate_focus(focus,views);
++    check(std::abs(std::tan(focus.eyes[0].angleLeft)-std::tan(focus.eyes[1].angleLeft)-.032f)<1e-6f,
++        "Stereo borders use the eye baseline at the selected distance");
++}
++
+ void quad_capture_d3d11_validation() {
++    check_quad_head_focus();
+     using Microsoft::WRL::ComPtr;
+     for(const auto format:{DXGI_FORMAT_R8G8B8A8_UNORM,DXGI_FORMAT_R8G8B8A8_UNORM_SRGB}) {
+         reset();quad11_ends=quad11_acquires=0;quad11_wait_result=XR_SUCCESS;
+@@ -83,6 +167,9 @@ void quad_capture_d3d11_validation() {
+         XrViewLocateInfo locate{XR_TYPE_VIEW_LOCATE_INFO};locate.viewConfigurationType=begin.primaryViewConfigurationType;locate.displayTime=123;
+         XrViewState state{XR_TYPE_VIEW_STATE};std::array<XrView,4> views;for(auto& v:views)v={XR_TYPE_VIEW};
+         check(cheeky_xrLocateViews(handle,&locate,&state,4,&count,views.data())==XR_SUCCESS&&count==4,"Quad11 locate");
++        CheekyGazeSnapshotV1 frame{};
++        check(CheekyOpenXR_GetGazeSnapshot(CHEEKY_GAZE_ABI_VERSION,&frame,sizeof(frame))&&
++            frame.predicted_display_time==locate.displayTime,"Quad11 publishes the application frame time");
+         uint32_t index{};XrSwapchainImageAcquireInfo acquire{XR_TYPE_SWAPCHAIN_IMAGE_ACQUIRE_INFO};
+         XrSwapchainImageWaitInfo wait{XR_TYPE_SWAPCHAIN_IMAGE_WAIT_INFO};wait.timeout=XR_INFINITE_DURATION;
+         XrSwapchainImageReleaseInfo release{XR_TYPE_SWAPCHAIN_IMAGE_RELEASE_INFO};
+@@ -112,6 +199,31 @@ void quad_capture_d3d11_validation() {
+             const auto x=unsigned((rect[0]+rect[2]*.5f)*32),y=unsigned((rect[1]+rect[3]*.5f)*32);const auto* center=pixels+y*mapped.RowPitch+x*4;
+             check(pixels[eye?1:0]==255&&pixels[eye?0:1]==0&&pixels[2]==0,"Quad11 periphery/slice/source rectangle wrong");
+             check(center[eye?0:2]==255&&center[eye?2:0]==0,"Quad11 focus/slice/FOV correction wrong");context->Unmap(staging.Get(),0);}
++        QuadFocusSettings rounded{true,75,60,45,25};
++        auto& history=sessions.at(handle).quad_capture_fovs;
++        const std::array<XrFovf,2> custom_fov{cheeky::quad_capture::inset_fov(views[0].fov,rounded),
++            cheeky::quad_capture::inset_fov(views[1].fov,rounded)};
++        const auto custom_rect=cheeky::quad_capture::inset_rect(views[0].fov,custom_fov[0]);
++        check(std::abs(custom_rect[2]-.75f)<.0001f&&std::abs(custom_rect[3]-.60f)<.0001f,"Quad focus width and height change the projection");
++        history[124]={custom_fov,rounded};end.displayTime=124;
++        check(cheeky_xrEndFrame(handle,&end)==XR_SUCCESS,"Quad11 frame uses its saved focus settings");
++        {
++            auto texture=quad11_chains.at(quad11_submitted[0]).texture;D3D11_TEXTURE2D_DESC desc{};texture->GetDesc(&desc);
++            desc.Usage=D3D11_USAGE_STAGING;desc.BindFlags=desc.MiscFlags=0;desc.CPUAccessFlags=D3D11_CPU_ACCESS_READ;
++            ComPtr<ID3D11Texture2D> staging;check(SUCCEEDED(device->CreateTexture2D(&desc,nullptr,&staging)),"Rounded quad readback texture");
++            context->CopyResource(staging.Get(),texture.Get());D3D11_MAPPED_SUBRESOURCE mapped{};
++            check(SUCCEEDED(context->Map(staging.Get(),0,D3D11_MAP_READ,0,&mapped)),"Rounded quad readback map");
++            const auto pixel=[&](float x,float y){return static_cast<const unsigned char*>(mapped.pData)+
++                unsigned(y*desc.Height)*mapped.RowPitch+unsigned(x*desc.Width)*4;};
++            const auto center_x=custom_rect[0]+custom_rect[2]*.5f;
++            const auto* corner=pixel(custom_rect[0]+.035f,custom_rect[1]+.035f);
++            const auto* edge=pixel(center_x,custom_rect[1]+.035f);
++            const auto* center=pixel(center_x,custom_rect[1]+custom_rect[3]*.5f);
++            check(corner[0]==255&&corner[2]==0&&edge[0]>0&&edge[2]>0&&center[2]==255,
++                "Rounded quad keeps periphery at corners, feathers edges and preserves center color");
++            context->Unmap(staging.Get(),0);
++        }
++        history[123]={{views[2].fov,views[3].fov},{}};
+         end.displayTime=777;
+         check(cheeky_xrEndFrame(handle,&end)==XR_SUCCESS,"Quad11 fixed inset cannot recover an unmatched display time");end.displayTime=123;
+         const auto previous_ends=quad11_ends;
+@@ -126,8 +238,214 @@ void quad_capture_d3d11_validation() {
+         if(errors)for(UINT64 i=0;i<errors->GetNumStoredMessages();++i){SIZE_T size{};errors->GetMessage(i,nullptr,&size);std::vector<char> storage(size);
+             auto* message=reinterpret_cast<D3D11_MESSAGE*>(storage.data());errors->GetMessage(i,message,&size);
+             if(message->Severity<=D3D11_MESSAGE_SEVERITY_ERROR){std::cerr<<message->pDescription<<'\n';check(false,"Quad11 D3D11 debug-layer error");}}
++        d.end_session=[](XrSession){return XR_SUCCESS;};
++        auto& tracking=sessions.at(handle).quad_head_focus;
++        QuadFocusSettings offset;
++        offset.head_offset=true;
++        std::array<XrView,2> pair{};
++        for(auto& view:pair)view.pose.orientation.w=1.f;
++        XrViewLocateInfo tracked{XR_TYPE_VIEW_LOCATE_INFO};
++        tracked.displayTime=1;
++        tracking.update(pair,tracked,offset,0);
++        for(auto& view:pair)view.pose.orientation={0.f,.2f,0.f,std::sqrt(.96f)};
++        ++tracked.displayTime;
++        check(tracking.update(pair,tracked,offset,0)[0]!=0.f,"Active session tracks a turned head");
++        check(cheeky_xrEndSession(handle)==XR_SUCCESS,"End Quad session");
++        ++tracked.displayTime;
++        check(tracking.update(pair,tracked,offset,0)==cheeky::quad_capture::FocusShift{},"Session end clears the head angle reference");
+         sessions.clear();compositor.reset();swapchains.clear();quad11_chains.clear();quad11_device=nullptr;
+     }
+     std::cout<<"PASS D3D11 quad selection/session/submission, pre-begin sampleable images, array/crop/SRGB pixels, DCS focus FOV, context state and wait recovery (WARP)\n";
+ }
++
++void quad_shared_color_validation() {
++    using Microsoft::WRL::ComPtr;
++    reset();quad11_wait_result=XR_SUCCESS;
++    ComPtr<ID3D11Device> device;ComPtr<ID3D11DeviceContext> context;
++    check(SUCCEEDED(D3D11CreateDevice(nullptr,D3D_DRIVER_TYPE_HARDWARE,nullptr,0,nullptr,0,
++        D3D11_SDK_VERSION,&device,nullptr,&context)),"Shared Quad hardware device");
++    quad11_device=device.Get();
++    cheeky::quad_capture::Compositor11 compositor;compositor.device=device;
++    compositor.create=quad11_create;compositor.destroy=quad11_destroy;compositor.enumerate_images=quad11_images;
++    compositor.acquire=quad11_acquire;compositor.wait=quad11_wait;compositor.release=quad11_release;
++    for(auto& eye:compositor.recommended){eye.recommendedImageRectWidth=eye.recommendedImageRectHeight=32;}
++    auto bridge=std::make_shared<cheeky::fg::D3D11Bridge>();
++    check(bridge->initialize(device.Get(),true),"Shared Quad bridge");compositor.fg_bridge=bridge;compositor.composed_capacity=1;
++    std::array<ComPtr<ID3D11Texture2D>,4> textures;std::array<cheeky::quad_capture::Input,4> inputs{};
++    std::array<XrCompositionLayerProjectionView,4> views{};
++    const std::array<unsigned char,4> colors[]{{255,0,0,255},{0,255,0,255},{0,0,255,255},{255,255,0,255}};
++    for(unsigned i=0;i<4;++i){
++        std::vector<unsigned char> pixels(32*32*4);for(unsigned p=0;p<32*32;++p)std::copy(colors[i].begin(),colors[i].end(),pixels.begin()+p*4);
++        D3D11_TEXTURE2D_DESC desc{};desc.Width=desc.Height=32;desc.ArraySize=desc.MipLevels=desc.SampleDesc.Count=1;
++        desc.Format=DXGI_FORMAT_R8G8B8A8_UNORM;desc.BindFlags=D3D11_BIND_SHADER_RESOURCE;
++        D3D11_SUBRESOURCE_DATA data{pixels.data(),32*4,0};check(SUCCEEDED(device->CreateTexture2D(&desc,&data,&textures[i])),"Shared Quad input");
++        inputs[i].texture11=textures[i].Get();inputs[i].format=desc.Format;inputs[i].image.imageRect={{0,0},{32,32}};
++        views[i]={XR_TYPE_COMPOSITION_LAYER_PROJECTION_VIEW};views[i].fov=i<2?XrFovf{-.8f,.8f,.8f,-.8f}:XrFovf{-.35f,.35f,.35f,-.35f};
++    }
++    XrCompositionLayerProjection projection{XR_TYPE_COMPOSITION_LAYER_PROJECTION};projection.viewCount=4;projection.views=views.data();
++    std::array<XrCompositionLayerProjectionView,2> presented{};
++    cheeky::fg::BufferedPresenter consumer;consumer.device=bridge->device12;consumer.queue=bridge->queue;consumer.interop11=bridge;consumer.quad_input=true;
++    check(consumer.producer.initialize(consumer.device.Get(),consumer.queue.Get()),"Shared Quad producer");
++    std::array<cheeky::fg::Image,2> captured{};
++    compositor.capture_shared_output=[&](unsigned eye,XrSwapchain chain,const std::shared_ptr<cheeky::quad_capture::Compositor11::ComposedSlot>& frame){
++        auto image=std::make_shared<cheeky::fg::TransportImage>();image->texture=frame->color12[eye];image->source_owner=frame;image->identity=eye+1;
++        captured[eye]=image;return consumer.capture_shared11(chain,image);
++    };
++    check(compositor.compose(inputs,projection,presented)==XR_SUCCESS,"Shared Quad composite");
++    check(captured[0]&&captured[1]&&compositor.composed_frames.size()==1,"Shared Quad direct capture");
++    CheekyFgPair guides;guides.capture_token=2;guides.producer_queue=bridge->queue.Get();
++    for(auto& eye:guides.eyes){eye.width=eye.height=32;eye.focus_width=eye.focus_height=1;eye.resolution_percent=100;eye.center_method=5;}
++    XrCompositionLayerProjection stereo{XR_TYPE_COMPOSITION_LAYER_PROJECTION};stereo.viewCount=2;stereo.views=presented.data();
++    auto job=std::make_shared<cheeky::fg::BufferedNative>();job->id=1;
++    check(consumer.backend->capture(job,&stereo,true,&guides,nullptr)==cheeky::fg::CaptureOutcome::captured,"Shared Quad captures leased eyes");
++    check(job->color[0]==captured[0]&&job->color[1]==captured[1]&&
++        consumer.producer.full_copies==0&&consumer.producer.region_copies==0,"Shared Quad avoids bridge/frozen/crop copies");
++    check(compositor.compose(inputs,projection,presented)==XR_SUCCESS&&compositor.composed_frames.size()==1,"Shared Quad busy pool uses native fallback without growth");
++    for(unsigned eye=0;eye<2;++eye){
++        auto texture=compositor.composed_frames[0]->color[eye];D3D11_TEXTURE2D_DESC d{};texture->GetDesc(&d);
++        d.Usage=D3D11_USAGE_STAGING;d.BindFlags=d.MiscFlags=0;d.CPUAccessFlags=D3D11_CPU_ACCESS_READ;
++        ComPtr<ID3D11Texture2D> staging;check(SUCCEEDED(device->CreateTexture2D(&d,nullptr,&staging)),"Shared Quad readback");
++        context->CopyResource(staging.Get(),texture.Get());D3D11_MAPPED_SUBRESOURCE mapped{};
++        check(SUCCEEDED(context->Map(staging.Get(),0,D3D11_MAP_READ,0,&mapped)),"Shared Quad readback map");
++        const auto* bytes=static_cast<const unsigned char*>(mapped.pData);
++        check(bytes[eye?1:0]==255,"Shared Quad outer color");
++        const auto* center=bytes+16*mapped.RowPitch+16*4;check(center[eye?0:2]==255,"Shared Quad center color");context->Unmap(staging.Get(),0);
++    }
++    consumer.producer.drain();consumer.captured.clear();captured={};job.reset();
++    auto* original=compositor.composed_frames[0]->color[0].Get();
++    check(compositor.compose(inputs,projection,presented)==XR_SUCCESS&&compositor.composed_frames[0]->color[0].Get()==original,"Shared Quad reuses released slot");
++    compositor.capture_shared_output={};consumer.captured.clear();captured={};consumer.producer.drain();
++    quad11_device=nullptr;
++    std::cout<<"PASS shared Quad color: composed pixels, direct leased inputs, zero FG copies, busy fallback and slot reuse\n";
++}
++
++void quad_color_match_validation() {
++    using Microsoft::WRL::ComPtr;
++    namespace quad=cheeky::quad_capture;
++    constexpr unsigned width=3072,height=3264;
++    constexpr auto format=DXGI_FORMAT_R8G8B8A8_UNORM_SRGB;
++    quad::Compositor11 compositor;
++    ComPtr<ID3D11DeviceContext> context;
++    check(SUCCEEDED(D3D11CreateDevice(nullptr,D3D_DRIVER_TYPE_HARDWARE,nullptr,0,nullptr,0,D3D11_SDK_VERSION,
++        &compositor.device,nullptr,&context)),"Color match hardware device");
++    compositor.create=quad11_create;compositor.destroy=quad11_destroy;compositor.enumerate_images=quad11_images;
++    compositor.acquire=quad11_acquire;compositor.wait=quad11_wait;compositor.release=quad11_release;
++    check(compositor.initialize()&&compositor.color_match.initialize(compositor.device.Get()),"Color match shaders and GPU tables");
++    compositor.focus_settings={true,50,40,10,10};
++    D3D11_TEXTURE2D_DESC desc{};desc.Width=width;desc.Height=height;
++    desc.MipLevels=desc.ArraySize=desc.SampleDesc.Count=1;desc.Format=format;
++    desc.BindFlags=D3D11_BIND_SHADER_RESOURCE|D3D11_BIND_RENDER_TARGET;
++    const auto texture=[&](float luma){
++        ComPtr<ID3D11Texture2D> t;ComPtr<ID3D11RenderTargetView> view;
++        check(SUCCEEDED(compositor.device->CreateTexture2D(&desc,nullptr,&t))&&
++            SUCCEEDED(compositor.device->CreateRenderTargetView(t.Get(),nullptr,&view)),"Seam test texture");
++        const float color[]{luma,luma,luma,1.f};context->ClearRenderTargetView(view.Get(),color);return t;
++    };
++    desc.Width=width/2;desc.Height=height/2;
++    const auto periphery=texture(.4f);
++    const std::array focus{texture(.4f),texture(.4f)};
++    constexpr unsigned char levels[]{56,129,211};
++    static constexpr unsigned char tinted[][3]{{92,60,52},{113,129,152},{198,216,230}};
++    std::vector<unsigned char> pixels(desc.Width*desc.Height*4);
++    for(unsigned y=0;y<desc.Height;++y)for(unsigned x=0;x<desc.Width;++x){
++        const auto band=x<desc.Width*5/12?0:x<desc.Width*7/12?1:2;
++        auto* rgba=&pixels[(y*desc.Width+x)*4];
++        rgba[0]=rgba[1]=rgba[2]=y>=3&&y<=8?(y<6?levels[0]:101):levels[band];
++        rgba[3]=255;
++    }
++    context->UpdateSubresource(periphery.Get(),0,nullptr,pixels.data(),desc.Width*4,0);
++    for(unsigned eye=0;eye<2;++eye){
++        for(unsigned y=0;y<desc.Height;++y)for(unsigned x=0;x<desc.Width;++x){
++            const auto band=x<desc.Width/3?0:x<desc.Width*2/3?1:2;
++            auto* rgba=&pixels[(y*desc.Width+x)*4];
++            const unsigned char lower_tint=y>=desc.Height/2?16:0;
++            rgba[0]=tinted[band][eye?2:0]+(eye?0:lower_tint);
++            rgba[1]=tinted[band][1];
++            rgba[2]=tinted[band][eye?0:2]+(eye?lower_tint:0);
++            rgba[3]=255;
++        }
++        context->UpdateSubresource(focus[eye].Get(),0,nullptr,pixels.data(),desc.Width*4,0);
++    }
++    desc.Width=width;desc.Height=height;
++    const std::array targets{texture(0.f),texture(0.f)};
++    const auto input=[&](ID3D11Texture2D* t){quad::Input result;result.texture11=t;result.format=format;
++        result.image.imageRect.extent={width/2,height/2};return result;};
++    const XrFovf outer{-.8f,.8f,.7f,-.7f};const auto inner=quad::inset_fov(outer,compositor.focus_settings);
++    std::array<quad::Compositor11::DrawInput,2> draws;
++    std::array<ComPtr<ID3D11CommandList>,2> commands;
++    for(unsigned eye=0;eye<2;++eye){
++        compositor.eyes[eye].width=width;compositor.eyes[eye].height=height;compositor.eyes[eye].format=format;
++        check(compositor.prepare_draw(eye,input(periphery.Get()),input(focus[eye].Get()),outer,inner,draws[eye]),"Seam draw setup");
++    }
++    for(unsigned mode=0;mode<commands.size();++mode){
++        compositor.focus_settings.color_match=mode!=0;
++        if(mode)compositor.color_match.record(compositor.deferred.Get(),compositor.constants.Get(),compositor.sampler.Get(),draws);
++        for(unsigned eye=0;eye<2;++eye)check(compositor.record_draw(eye,draws[eye],targets[eye].Get()),"Seam stereo draw");
++        check(SUCCEEDED(compositor.deferred->FinishCommandList(FALSE,&commands[mode])),"Seam command list");
++    }
++    desc.Width=desc.Height=1;desc.Usage=D3D11_USAGE_STAGING;desc.BindFlags=0;desc.CPUAccessFlags=D3D11_CPU_ACCESS_READ;
++    ComPtr<ID3D11Texture2D> staging;
++    check(SUCCEEDED(compositor.device->CreateTexture2D(&desc,nullptr,&staging)),"Seam pixel staging");
++    const auto pixel_at=[&](unsigned eye,unsigned x,unsigned y,unsigned channel){const D3D11_BOX box{x,y,0,x+1,y+1,1};
++        context->CopySubresourceRegion(staging.Get(),0,0,0,0,targets[eye].Get(),0,&box);D3D11_MAPPED_SUBRESOURCE mapped{};
++        check(SUCCEEDED(context->Map(staging.Get(),0,D3D11_MAP_READ,0,&mapped)),"Read seam pixel");
++        const auto value=static_cast<const unsigned char*>(mapped.pData)[channel];context->Unmap(staging.Get(),0);return value;};
++    constexpr unsigned shadow=3*width/8,mid=width/2,highlight=5*width/8,top=height*3/10;
++    const auto samples=[&](unsigned eye){
++        const unsigned channel=eye?2:0;
++        return std::array{pixel_at(eye,shadow,0,channel),pixel_at(eye,mid,0,channel),
++            pixel_at(eye,mid,height-1,channel),pixel_at(eye,mid,height/2,channel)};
++    };
++    context->ExecuteCommandList(commands[0].Get(),TRUE);
++    const std::array baseline{samples(0),samples(1)};
++    const std::array center{pixel_at(0,mid,height/2,0),pixel_at(1,mid,height/2,0)};
++    context->ExecuteCommandList(commands[1].Get(),TRUE);
++    for(unsigned eye=0;eye<2;++eye){
++        const unsigned warm=eye?2:0,cool=eye?0:2;
++        check(pixel_at(eye,shadow,0,warm)>levels[0]&&pixel_at(eye,shadow,0,warm)>pixel_at(eye,shadow,0,cool)&&
++            pixel_at(eye,mid,0,warm)<levels[1]&&pixel_at(eye,mid,0,cool)>levels[1]&&
++            pixel_at(eye,highlight,0,1)>levels[2]&&pixel_at(eye,highlight,0,cool)>levels[2],
++            "Shadows, midtones and highlights use per-eye RGB gains");
++        check(pixel_at(eye,width/2,height/2,0)==center[eye],"Tone correction preserves the focus");
++    }
++
++    const auto linear=[](unsigned char code){
++        const float v=code/255.f;
++        return v<=.04045f?v/12.92f:std::pow((v+.055f)/1.055f,2.4f);
++    };
++    const float sample=linear(101);
++    const float shadow_gain=linear(pixel_at(0,mid,8,0))/linear(levels[0]);
++    const float mid_gain=linear(pixel_at(0,mid,0,0))/linear(levels[1]);
++    const float t=(sample-.04f)/(.22f-.04f);
++    const float expected=sample*std::lerp(shadow_gain,mid_gain,t*t*(3.f-2.f*t));
++    // Reconstruct the two endpoints from sRGB readback and allow for its rounding.
++    check(std::abs(linear(pixel_at(0,mid,14,0))-expected)<.006f,"Tone gains blend across intermediate brightness");
++
++    const auto seam_error=[&](){
++        int sum=0;
++        for(unsigned eye=0;eye<2;++eye)for(unsigned c=0;c<3;++c){
++            const unsigned k=eye?2-c:c;
++            const int upper=tinted[1][k],lower=upper+(k==0?16:0);
++            sum+=std::abs(int(pixel_at(eye,mid,top-4,c))-upper)+
++                std::abs(int(pixel_at(eye,mid,height-top+4,c))-lower);
++        }
++        return sum;
++    };
++    const auto matched_error=seam_error();
++    context->ExecuteCommandList(commands[0].Get(),TRUE);
++    check(seam_error()>matched_error,"Color correction improves both-eye seam samples");
++    check(samples(0)==baseline[0]&&samples(1)==baseline[1],"Disabling color match restores the uncorrected eyes");
++
++    compositor.focus_settings.color_match=true;
++    compositor.focus_settings.feather=0;
++    for(auto& draw:draws)draw.params[15]=0;
++    compositor.color_match.record(compositor.deferred.Get(),compositor.constants.Get(),compositor.sampler.Get(),draws);
++    for(unsigned eye=0;eye<2;++eye)check(compositor.record_draw(eye,draws[eye],targets[eye].Get()),"Draw matched hard seams");
++    ComPtr<ID3D11CommandList> hard_seams;
++    check(SUCCEEDED(compositor.deferred->FinishCommandList(FALSE,&hard_seams)),"Hard seam command list");
++    context->ExecuteCommandList(hard_seams.Get(),TRUE);
++    check(pixel_at(0,shadow,top-4,0)>levels[0]&&pixel_at(0,width/2,height/2,0)==center[0],"Color correction works with zero feather");
++
++    std::cout<<"PASS stereo RGB color match, disabled match and zero feather\n";
++}
+ }
+diff --git a/tests/openxr_binding/quad_capture_validation.hpp b/tests/openxr_binding/quad_capture_validation.hpp
+index 6f2f9de..c1c5ecf 100644
+--- a/tests/openxr_binding/quad_capture_validation.hpp
++++ b/tests/openxr_binding/quad_capture_validation.hpp
+@@ -84,6 +84,12 @@ void quad_capture_validation() {
+     check(cheeky_xrEnumerateViewConfigurationViews(instance,1,cheeky::quad_capture::configuration,3,&count,recommended.data())==XR_ERROR_SIZE_INSUFFICIENT,"Quad view short-buffer query");
+     check(cheeky_xrEnumerateViewConfigurationViews(instance,1,cheeky::quad_capture::configuration,4,&count,recommended.data())==XR_SUCCESS,"Quad recommendations");
+     for(const auto& v:recommended)check(v.recommendedImageRectWidth==16&&v.recommendedImageRectHeight==16,"Quad recommendation dimensions");
++    instances.at(instance).quad_focus_render_percent={25,75};
++    check(cheeky_xrEnumerateViewConfigurationViews(instance,1,cheeky::quad_capture::configuration,4,&count,recommended.data())==XR_SUCCESS,
++        "Quad focus sizing query");
++    for(unsigned i=0;i<4;++i)check(recommended[i].recommendedImageRectWidth==(i<2?16u:8u)&&
++        recommended[i].recommendedImageRectHeight==(i<2?16u:24u),"Only the focus views use the startup width and height");
++    instances.at(instance).quad_focus_render_percent={50,50};
+     ComPtr<ID3D12Debug> debug;if(SUCCEEDED(D3D12GetDebugInterface(IID_PPV_ARGS(&debug))))debug->EnableDebugLayer();
+     ComPtr<IDXGIFactory4> factory;ComPtr<IDXGIAdapter> warp;ComPtr<ID3D12Device> device;
+     check(SUCCEEDED(CreateDXGIFactory1(IID_PPV_ARGS(&factory)))&&SUCCEEDED(factory->EnumWarpAdapter(IID_PPV_ARGS(&warp)))&&
+diff --git a/tests/openxr_binding/quad_native_pool_validation.hpp b/tests/openxr_binding/quad_native_pool_validation.hpp
+new file mode 100644
+index 0000000..28ddb01
+--- /dev/null
++++ b/tests/openxr_binding/quad_native_pool_validation.hpp
+@@ -0,0 +1,81 @@
++// Exercise the production native atlas pool with actual D3D11 textures.
++void quad_native_pool_validation() {
++    using Microsoft::WRL::ComPtr;
++    ComPtr<ID3D11Device> device;ComPtr<ID3D11DeviceContext> context;
++    check(SUCCEEDED(D3D11CreateDevice(nullptr,D3D_DRIVER_TYPE_WARP,nullptr,0,nullptr,0,
++        D3D11_SDK_VERSION,&device,nullptr,&context)),"Native atlas test device");
++    cheeky::quad_capture::QuadFg11 atlas(device.Get());atlas.enable(true,true);
++    std::array<ComPtr<ID3D11Texture2D>,4> depth,motion;
++    CheekyQuadViewsV1 roles{};roles.active=1;roles.status=2;roles.revision=1;
++    std::array<XrCompositionLayerProjectionView,4> views{};
++    XrCompositionLayerProjection projection{XR_TYPE_COMPOSITION_LAYER_PROJECTION};
++    projection.viewCount=4;projection.views=views.data();
++    for(unsigned i=0;i<4;++i){
++        const unsigned size=i<2?64:32;
++        D3D11_TEXTURE2D_DESC desc{};desc.Width=desc.Height=size;desc.MipLevels=desc.ArraySize=1;
++        desc.SampleDesc.Count=1;desc.Usage=D3D11_USAGE_DEFAULT;desc.BindFlags=D3D11_BIND_SHADER_RESOURCE;
++        desc.Format=DXGI_FORMAT_R32_FLOAT;
++        std::vector<float> depths(size*size,i<2?.25f:.75f);
++        D3D11_SUBRESOURCE_DATA initial{depths.data(),size*UINT(sizeof(float)),0};
++        check(SUCCEEDED(device->CreateTexture2D(&desc,&initial,&depth[i])),"Native atlas input depth");
++        desc.Format=DXGI_FORMAT_R32G32_FLOAT;
++        std::vector<std::array<float,2>> vectors(size*size,i<2?std::array{.125f,-.25f}:std::array{.5f,-.125f});
++        initial={vectors.data(),size*2*UINT(sizeof(float)),0};
++        check(SUCCEEDED(device->CreateTexture2D(&desc,&initial,&motion[i])),"Native atlas input motion");
++        roles.views[i].dlss_view=i+1;roles.views[i].registration_generation=1;
++        views[i].type=XR_TYPE_COMPOSITION_LAYER_PROJECTION_VIEW;
++        views[i].subImage.imageRect.extent={int(size),int(size)};
++    }
++    const std::array<std::array<float,4>,2> insets{{{.25f,.25f,.5f,.5f},{.25f,.25f,.5f,.5f}}};
++    unsigned method=cheeky_fg_hybrid_base;
++    auto build=[&](uint64_t forget_generation=0){
++        for(unsigned i=0;i<4;++i){
++            const unsigned size=i<2?64:32;
++            CheekyQuadFgSourceV1 input;input.context=context.Get();input.motion=motion[i].Get();
++            if(method!=cheeky_fg_hybrid_base)input.depth=depth[i].Get();
++            input.generation=1;auto& g=input.meta;g.feature=i+1;g.configuration=1;
++            g.width=g.height=g.depth_width=g.depth_height=g.motion_width=g.motion_height=size;
++            g.center_method=method;g.configuration=method;
++            g.motion_scale_x=g.motion_scale_y=float(size);
++            check(atlas.observe(input),"Native atlas observes each source once");
++        }
++        if(forget_generation)atlas.forget(roles.views[0].dlss_view,forget_generation);
++        // This fixture has no Present/OpenXR submission to flush the immediate context.
++        auto result=atlas.build_native(roles,projection,insets);atlas.finish();context->Flush();return result;
++    };
++    std::array<cheeky::quad_capture::QuadFg11::NativeResult,4> held;
++    std::array<ID3D11Texture2D*,4> identities{};
++    for(unsigned i=0;i<held.size();++i){
++        held[i]=build();check(held[i].valid&&held[i].lease,"Native atlas obtains leased pool slot");
++        check(!held[i].depth[0]&&!held[i].depth[1],"Hybrid with depth off builds no depth atlas");
++        identities[i]=held[i].motion[0].Get();
++        for(unsigned j=0;j<i;++j)check(identities[i]!=identities[j],"Native atlas preserves busy slots");
++    }
++    check(!build().valid,"Native atlas returns unavailable while all four slots are leased");
++    held[0]={};
++    for(unsigned iteration=0;iteration<100;++iteration){
++        auto next=build();check(next.valid&&next.motion[0].Get()==identities[0],
++            "Native atlas reuses the retired slot instead of allocating every frame");
++    }
++    for(auto& item:held)item={};
++    method=cheeky_fg_hybrid_base+2;
++    auto guided=build();
++    check(guided.valid&&guided.depth[0]&&guided.depth[1],"Enabling splat restores the depth atlas");
++    D3D11_TEXTURE2D_DESC desc{};guided.motion[0]->GetDesc(&desc);
++    check(desc.Format==DXGI_FORMAT_R32G32_FLOAT,"Native Quad motion uses RG32_FLOAT");
++    desc.Usage=D3D11_USAGE_STAGING;desc.BindFlags=0;desc.CPUAccessFlags=D3D11_CPU_ACCESS_READ;
++    ComPtr<ID3D11Texture2D> staging;check(SUCCEEDED(device->CreateTexture2D(&desc,nullptr,&staging)),"Native atlas readback");
++    context->CopyResource(staging.Get(),guided.motion[0].Get());
++    D3D11_MAPPED_SUBRESOURCE read{};
++    check(SUCCEEDED(context->Map(staging.Get(),0,D3D11_MAP_READ,0,&read)),"Native atlas map");
++    const auto* wide=static_cast<const float*>(read.pData);
++    const auto* center=reinterpret_cast<const float*>(static_cast<const char*>(read.pData)+32*read.RowPitch)+64;
++    check(wide[0]==.125f&&wide[1]==-.25f&&center[0]==.25f&&center[1]==-.0625f,
++        "Both motion components survive wide/center atlas mapping");
++    context->Unmap(staging.Get(),0);
++    check(build(2).valid,"Retiring an unrelated generation keeps the active source");
++    check(!build(1).valid,"Retiring the active generation drops its snapshot before assembly");
++    check(build().valid,"Quad source slots can be reused after retirement");
++    atlas.enable(false);atlas.finish();context->Flush();
++    std::cout<<"PASS native Quad atlas: optional depth, RG32 motion pixels, bounded leases and slot reuse\n";
++}

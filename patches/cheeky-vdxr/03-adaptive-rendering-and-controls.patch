@@ -1,0 +1,2882 @@
+diff --git a/shared/runtime_host_api.hpp b/shared/runtime_host_api.hpp
+index db51a25..ffa0b34 100644
+--- a/shared/runtime_host_api.hpp
++++ b/shared/runtime_host_api.hpp
+@@ -6,7 +6,7 @@
+ // an unloadable host cross into the resident runtime. The caller keeps device
+ // and queue alive for Start/Tick; the runtime does not own these pointers.
+ constexpr std::uint32_t cheeky_runtime_abi = 1;
+-constexpr std::size_t cheeky_runtime_message_capacity = 32768;
++constexpr std::size_t cheeky_runtime_message_capacity = 64 * 1024;
+ enum class CheekyRuntimeHost : std::uint32_t {
+     uevr = 0,
+     standalone = 1,
+diff --git a/src/addon.cpp b/src/addon.cpp
+index 450c810..8b11caa 100644
+--- a/src/addon.cpp
++++ b/src/addon.cpp
+@@ -767,6 +767,22 @@ void draw_openxr_gaze_diagnostics() {
+ 
+ void load_settings_from_reshade() noexcept {
+     auto settings = current_settings();
++    static_cast<void>(reshade::get_config_value(nullptr, config_section, "QuadPrecompose", settings.quad_precompose));
++    static_cast<void>(reshade::get_config_value(nullptr, config_section, "QuadFocusWidth", settings.quad_focus.width));
++    static_cast<void>(reshade::get_config_value(nullptr, config_section, "QuadFocusHeight", settings.quad_focus.height));
++    static_cast<void>(reshade::get_config_value(nullptr, config_section, "QuadMatchStereoBorders", settings.quad_focus.match_stereo_borders));
++    static_cast<void>(reshade::get_config_value(nullptr, config_section, "QuadStereoDistanceM", settings.quad_focus.stereo_distance_m));
++    static_cast<void>(reshade::get_config_value(nullptr, config_section, "QuadCustomBlend", settings.quad_focus.custom_blend));
++    static_cast<void>(reshade::get_config_value(nullptr, config_section, "QuadCornerRadius", settings.quad_focus.radius));
++    static_cast<void>(reshade::get_config_value(nullptr, config_section, "QuadEdgeFeather", settings.quad_focus.feather));
++    static_cast<void>(reshade::get_config_value(nullptr, config_section, "QuadColorMatch", settings.quad_focus.color_match));
++    static_cast<void>(reshade::get_config_value(nullptr, config_section, "QuadHeadOffset", settings.quad_focus.head_offset));
++    static_cast<void>(reshade::get_config_value(nullptr, config_section, "QuadFocusHorizontalBias", settings.quad_focus.horizontal.bias));
++    static_cast<void>(reshade::get_config_value(nullptr, config_section, "QuadFocusHorizontalAngleGain", settings.quad_focus.horizontal.angle_gain));
++    static_cast<void>(reshade::get_config_value(nullptr, config_section, "QuadFocusHorizontalDeadzone", settings.quad_focus.horizontal.deadzone));
++    static_cast<void>(reshade::get_config_value(nullptr, config_section, "QuadFocusVerticalBias", settings.quad_focus.vertical.bias));
++    static_cast<void>(reshade::get_config_value(nullptr, config_section, "QuadFocusVerticalAngleGain", settings.quad_focus.vertical.angle_gain));
++    static_cast<void>(reshade::get_config_value(nullptr, config_section, "QuadFocusVerticalDeadzone", settings.quad_focus.vertical.deadzone));
+     static_cast<void>(reshade::get_config_value(nullptr,config_section,"FgForceReflexOff",settings.fg.force_reflex_off));
+     static_cast<void>(reshade::get_config_value(
+         nullptr, config_section, "D3D12LowerHook", settings.d3d12_lower_hook
+@@ -980,6 +996,22 @@ void load_settings_from_reshade() noexcept {
+ }
+ 
+ void save_settings_to_reshade(const Settings& settings) noexcept {
++    reshade::set_config_value(nullptr, config_section, "QuadPrecompose", settings.quad_precompose);
++    reshade::set_config_value(nullptr, config_section, "QuadFocusWidth", settings.quad_focus.width);
++    reshade::set_config_value(nullptr, config_section, "QuadFocusHeight", settings.quad_focus.height);
++    reshade::set_config_value(nullptr, config_section, "QuadMatchStereoBorders", settings.quad_focus.match_stereo_borders);
++    reshade::set_config_value(nullptr, config_section, "QuadStereoDistanceM", settings.quad_focus.stereo_distance_m);
++    reshade::set_config_value(nullptr, config_section, "QuadCustomBlend", settings.quad_focus.custom_blend);
++    reshade::set_config_value(nullptr, config_section, "QuadCornerRadius", settings.quad_focus.radius);
++    reshade::set_config_value(nullptr, config_section, "QuadEdgeFeather", settings.quad_focus.feather);
++    reshade::set_config_value(nullptr, config_section, "QuadColorMatch", settings.quad_focus.color_match);
++    reshade::set_config_value(nullptr, config_section, "QuadHeadOffset", settings.quad_focus.head_offset);
++    reshade::set_config_value(nullptr, config_section, "QuadFocusHorizontalBias", settings.quad_focus.horizontal.bias);
++    reshade::set_config_value(nullptr, config_section, "QuadFocusHorizontalAngleGain", settings.quad_focus.horizontal.angle_gain);
++    reshade::set_config_value(nullptr, config_section, "QuadFocusHorizontalDeadzone", settings.quad_focus.horizontal.deadzone);
++    reshade::set_config_value(nullptr, config_section, "QuadFocusVerticalBias", settings.quad_focus.vertical.bias);
++    reshade::set_config_value(nullptr, config_section, "QuadFocusVerticalAngleGain", settings.quad_focus.vertical.angle_gain);
++    reshade::set_config_value(nullptr, config_section, "QuadFocusVerticalDeadzone", settings.quad_focus.vertical.deadzone);
+     reshade::set_config_value(nullptr,config_section,"FgForceReflexOff",settings.fg.force_reflex_off);
+     reshade::set_config_value(nullptr, config_section, "D3D12LowerHook", settings.d3d12_lower_hook);
+     reshade::set_config_value(
+diff --git a/src/backend.hpp b/src/backend.hpp
+index 4d10214..3fea390 100644
+--- a/src/backend.hpp
++++ b/src/backend.hpp
+@@ -51,6 +51,9 @@ struct D3D12BackendTiming {
+ ) noexcept;
+ 
+ void release_d3d12_view(DlssViewId view_id) noexcept;
++void release_d3d12_baseline(DlssViewId view_id) noexcept;
++[[nodiscard]] bool d3d12_baseline_matches(const DlssFrameContract& contract,
++    const CropGeometry& crop, const NgxParameters* parameters) noexcept;
+ void skip_d3d12_history(DlssViewId view_id) noexcept;
+ 
+ [[nodiscard]] bool composite_d3d11_crop(
+diff --git a/src/d3d11_d3d12_transport.cpp b/src/d3d11_d3d12_transport.cpp
+index bca0fae..990f266 100644
+--- a/src/d3d11_d3d12_transport.cpp
++++ b/src/d3d11_d3d12_transport.cpp
+@@ -12,6 +12,7 @@
+ #include "cheeky_fg_shader11.hpp"
+ #include "fg_sr_region.hpp"
+ #include "ngx_parameter_overlay.hpp"
++#include "quad_view_bridge.hpp"
+ 
+ #include <d3d11_4.h>
+ #include "d3d_shaders.hpp"
+@@ -167,6 +168,7 @@ struct TransportSlot {
+     SharedTexture depth;
+     SharedTexture motion_vectors;
+     SharedTexture output;
++    SharedTexture baseline_output;
+     SharedTexture peripheral_color;
+     SharedTexture peripheral_depth;
+     SharedTexture peripheral_motion_vectors;
+@@ -217,6 +219,11 @@ struct TransportView {
+     std::array<TransportSlot, transport_slot_count> slots{};
+     std::uint32_t next_slot{};
+     std::uint32_t texture_slot{transport_slot_count}; // Slot that last used its shared textures.
++    std::uint64_t baseline_warm_fence{};
++    std::uint64_t baseline_session{};
++    bool baseline_warmup_attempted{};
++    bool baseline_active{};
++    float automatic_nr_scale{-1.0F};
+ };
+ 
+ struct TransportDevice {
+@@ -277,6 +284,7 @@ void release_slot(TransportSlot& slot) noexcept {
+     release(slot.timing_begin);
+     release(slot.timing_disjoint);
+     release_shared_texture(slot.output);
++    release_shared_texture(slot.baseline_output);
+     release_shared_texture(slot.motion_vectors);
+     release_shared_texture(slot.depth);
+     release_shared_texture(slot.color);
+@@ -297,7 +305,7 @@ void release_slot(TransportSlot& slot) noexcept {
+ // values stay with their slot.
+ void release_slot_textures(TransportSlot& slot) noexcept {
+     for (auto* texture : {&slot.fg_depth, &slot.fg_motion, &slot.color, &slot.depth,
+-            &slot.motion_vectors, &slot.output, &slot.peripheral_color, &slot.peripheral_depth,
++            &slot.motion_vectors, &slot.output, &slot.baseline_output, &slot.peripheral_color, &slot.peripheral_depth,
+             &slot.peripheral_motion_vectors, &slot.peripheral_output, &slot.nr_color,
+             &slot.nr_depth, &slot.nr_motion_vectors}) release_shared_texture(*texture);
+ }
+@@ -307,6 +315,7 @@ void swap_slot_textures(TransportSlot& a, TransportSlot& b) noexcept {
+     swap(a.fg_depth, b.fg_depth); swap(a.fg_motion, b.fg_motion);
+     swap(a.color, b.color); swap(a.depth, b.depth);
+     swap(a.motion_vectors, b.motion_vectors); swap(a.output, b.output);
++    swap(a.baseline_output, b.baseline_output);
+     swap(a.peripheral_color, b.peripheral_color); swap(a.peripheral_depth, b.peripheral_depth);
+     swap(a.peripheral_motion_vectors, b.peripheral_motion_vectors);
+     swap(a.peripheral_output, b.peripheral_output);
+@@ -887,6 +896,15 @@ void trace_format_support(
+     return &device.views.back();
+ }
+ 
++[[nodiscard]] bool shares_peripheral_pre_sr_color(
++    bool nr_before, std::uint32_t render_width, std::uint32_t render_height,
++    std::uint32_t output_width, std::uint32_t output_height
++) noexcept {
++    // Both textures receive the same render subrect and format. Preserve the
++    // original peripheral resource dimensions when the Pre-SR staging size differs.
++    return nr_before && render_width == output_width && render_height == output_height;
++}
++
+ [[nodiscard]] bool slot_matches(
+     const TransportSlot& slot,
+     const CropGeometry& crop,
+@@ -909,9 +927,16 @@ void trace_format_support(
+     const DXGI_FORMAT color_format,
+     const DXGI_FORMAT motion_format,
+     const DXGI_FORMAT output_format,
+-    const bool nr_before
++    const bool nr_before,
++    const bool reuse_sr_inputs_for_nr
+ ) noexcept {
++    const bool share_peripheral_color = shares_peripheral_pre_sr_color(nr_before,
++        peripheral_render_width, peripheral_render_height, output_width, output_height);
+     return slot.nr_before == nr_before && slot.color.resource12 != nullptr &&
++           slot.peripheral_enabled == peripheral_enabled &&
++           (slot.nr_allocator != nullptr) == (nr_enabled && !nr_before) &&
++           ((slot.color.flags & D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS) != 0) ==
++               reuse_sr_inputs_for_nr &&
+         slot.input_width == crop.input_width &&
+         slot.input_height == crop.input_height &&
+         slot.output_width == crop.output_width &&
+@@ -921,8 +946,7 @@ void trace_format_support(
+         slot.motion_format == motion_format &&
+         slot.output_format == output_format &&
+         (!peripheral_enabled || (
+-            slot.peripheral_enabled &&
+-            slot.peripheral_color.resource12 != nullptr &&
++            (slot.peripheral_color.resource12 != nullptr) == !share_peripheral_color &&
+             slot.peripheral_depth.resource12 != nullptr &&
+             slot.peripheral_motion_vectors.resource12 != nullptr &&
+             slot.peripheral_output.resource12 != nullptr &&
+@@ -933,7 +957,7 @@ void trace_format_support(
+             slot.peripheral_motion_width == peripheral_motion_width &&
+             slot.peripheral_motion_height == peripheral_motion_height
+         )) &&
+-        (!nr_enabled || (
++           (!nr_enabled || reuse_sr_inputs_for_nr || (
+             slot.nr_color.resource12 != nullptr &&
+             slot.nr_input_width == render_width &&
+             slot.nr_input_height == render_height &&
+@@ -967,7 +991,8 @@ void trace_format_support(
+     const DXGI_FORMAT color_format,
+     const DXGI_FORMAT motion_format,
+     const DXGI_FORMAT output_format,
+-    const bool nr_before
++    const bool nr_before,
++    const bool reuse_sr_inputs_for_nr
+ ) noexcept {
+     // Slot is idle; preserve textures with matching descriptors and all
+     // size-independent allocator/query objects instead of tearing it all down.
+@@ -985,7 +1010,9 @@ void trace_format_support(
+     const auto allocator_result = slot.allocator ? S_OK : device.device12->CreateCommandAllocator(
+         D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&slot.allocator)
+     );
+-    const auto nr_allocator_result = FAILED(allocator_result) || !nr_enabled || slot.nr_allocator
++    const bool nr_after = nr_enabled && !nr_before;
++    if (!nr_after) release(slot.nr_allocator);
++    const auto nr_allocator_result = FAILED(allocator_result) || !nr_after || slot.nr_allocator
+         ? allocator_result
+         : device.device12->CreateCommandAllocator(
+             D3D12_COMMAND_LIST_TYPE_DIRECT,
+@@ -1049,20 +1076,29 @@ void trace_format_support(
+     }
+     // Disabled groups must not retain stale textures behind newly written
+     // geometry metadata; re-enabling must allocate for the current dimensions.
+-    if (!nr_enabled) {
++    if (!nr_enabled || reuse_sr_inputs_for_nr) {
+         release_shared_texture(slot.nr_color);
++    }
++    const bool share_nr_guides = nr_before && peripheral_enabled;
++    if (!nr_enabled || reuse_sr_inputs_for_nr || share_nr_guides) {
+         release_shared_texture(slot.nr_depth);
+         release_shared_texture(slot.nr_motion_vectors);
+     }
+-    if (!peripheral_enabled) {
++    const bool share_peripheral_color = shares_peripheral_pre_sr_color(nr_before,
++        peripheral_render_width, peripheral_render_height, output_width, output_height);
++    if (!peripheral_enabled || share_peripheral_color) {
+         release_shared_texture(slot.peripheral_color);
++    }
++    if (!peripheral_enabled) {
+         release_shared_texture(slot.peripheral_depth);
+         release_shared_texture(slot.peripheral_motion_vectors);
+         release_shared_texture(slot.peripheral_output);
+     }
++    const auto color_flags = reuse_sr_inputs_for_nr
++        ? D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS : D3D12_RESOURCE_FLAG_NONE;
+     if (!create_shared_texture(device, "color",
+             crop.input_width, crop.input_height, color_format,
+-            D3D12_RESOURCE_FLAG_NONE, slot.color) ||
++            color_flags, slot.color) ||
+         !create_shared_texture(device, "depth",
+             crop.input_width, crop.input_height, DXGI_FORMAT_R32_FLOAT,
+             D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS, slot.depth) ||
+@@ -1073,9 +1109,9 @@ void trace_format_support(
+             crop.output_width, crop.output_height, output_format,
+             D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS, slot.output) ||
+         (peripheral_enabled && (
+-            !create_shared_texture(device, "peripheral DLSS color",
++            (!share_peripheral_color && !create_shared_texture(device, "peripheral DLSS color",
+                 peripheral_render_width, peripheral_render_height, color_format,
+-                D3D12_RESOURCE_FLAG_NONE, slot.peripheral_color) ||
++                D3D12_RESOURCE_FLAG_NONE, slot.peripheral_color)) ||
+             !create_shared_texture(device, "peripheral DLSS depth",
+                 peripheral_render_width, peripheral_render_height,
+                 DXGI_FORMAT_R32_FLOAT,
+@@ -1089,16 +1125,16 @@ void trace_format_support(
+                 D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS,
+                 slot.peripheral_output)
+         )) ||
+-        (nr_enabled && (
++        (nr_enabled && !reuse_sr_inputs_for_nr && (
+             !create_shared_texture(device, "NR composited color",
+                 output_width, output_height, nr_before ? color_format : output_format,
+                 D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS, slot.nr_color) ||
+-            !create_shared_texture(device, "NR depth",
++            (!share_nr_guides && (!create_shared_texture(device, "NR depth",
+                 render_width, render_height, DXGI_FORMAT_R32_FLOAT,
+                 D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS, slot.nr_depth) ||
+             !create_shared_texture(device, "NR motion vectors",
+                 motion_width, motion_height, motion_format,
+-                D3D12_RESOURCE_FLAG_NONE, slot.nr_motion_vectors)
++                D3D12_RESOURCE_FLAG_NONE, slot.nr_motion_vectors)))
+         ))) {
+         release_slot(slot);
+         return false;
+@@ -1689,6 +1725,10 @@ bool evaluate_d3d11_via_d3d12(
+ 
+     const auto reconstruction = supersampled_crop(crop,
+         settings.enabled ? settings.center_supersampling : 1.0F);
++    const auto baseline_reconstruction = supersampled_crop(crop, 1.0F);
++    const bool prepare_sr_baseline = settings.quad_sr_selection.prepare &&
++        (baseline_reconstruction.output_width != reconstruction.output_width ||
++         baseline_reconstruction.output_height != reconstruction.output_height);
+ 
+     const auto mv_crop_x = mv_low_res
+         ? crop.input_base_x
+@@ -1702,6 +1742,7 @@ bool evaluate_d3d11_via_d3d12(
+     const auto nr_motion_height = mv_low_res ? render_height : out_height;
+     const bool nr_before = settings.nr_enabled &&
+         settings.nr_processing_order == NrProcessingOrder::before_upscaling;
++    const bool nr_bypassed = nr_before && settings.quad_nr_selection.bypass;
+     const auto nr_processing_width = nr_before ? render_width : out_width;
+     const auto nr_processing_height = nr_before ? render_height : out_height;
+     DlssNrGeometry nr_geometry{};
+@@ -1749,6 +1790,14 @@ bool evaluate_d3d11_via_d3d12(
+         ? scaled_capacity(nr_geometry.width, nr_motion_width, nr_processing_width) : 0U;
+     const auto nr_mv_capacity_y = settings.nr_enabled
+         ? scaled_capacity(nr_geometry.height, nr_motion_height, nr_processing_height) : 0U;
++    // A full-view SR pass reads the same source rectangle as Pre-SR NR.
++    // A cropped pass keeps its original SR inputs and NR-to-SR crop copy.
++    const bool reuse_sr_inputs_for_nr = nr_before && !settings.peripheral_dlaa_enabled &&
++        crop.input_base_x == 0U && crop.input_base_y == 0U &&
++        crop.input_width == render_width && crop.input_height == render_height &&
++        reconstruction.input_width == render_width && reconstruction.input_height == render_height &&
++        mv_crop_x == 0U && mv_crop_y == 0U &&
++        mv_width == nr_motion_width && mv_height == nr_motion_height;
+     if (!in_bounds(mv_x + mv_crop_x, mv_width, motion_desc.Width) ||
+         !in_bounds(mv_y + mv_crop_y, mv_height, motion_desc.Height) ||
+         ((settings.peripheral_dlaa_enabled || settings.fg.enabled || fg_requires_d3d12(settings)) && (
+@@ -1881,7 +1930,7 @@ bool evaluate_d3d11_via_d3d12(
+             peripheral_dimensions.width, peripheral_dimensions.height,
+             nr_motion_width, nr_motion_height,
+             settings.peripheral_dlaa_enabled,
+-            color_desc.Format, motion_desc.Format, output_desc.Format, nr_before
++        color_desc.Format, motion_desc.Format, output_desc.Format, nr_before, reuse_sr_inputs_for_nr
+         );
+     if (!slot_ready && !textures_retired()) {
+         release(context4);
+@@ -1896,13 +1945,54 @@ bool evaluate_d3d11_via_d3d12(
+             peripheral_dimensions.width, peripheral_dimensions.height,
+             nr_motion_width, nr_motion_height,
+             settings.peripheral_dlaa_enabled,
+-            color_desc.Format, motion_desc.Format, output_desc.Format, nr_before
++        color_desc.Format, motion_desc.Format, output_desc.Format, nr_before, reuse_sr_inputs_for_nr
+         )) {
+         release(context4);
+         return reject_transport(
+             D3D11TransportStatus::resource_initialization_failed
+         );
+     }
++    bool baseline_ready{};
++    if (prepare_sr_baseline) {
++        mirror_transport_parameters(device->ngx_parameters, parameters, contract);
++        if (view->baseline_session != settings.quad_sr_selection.session ||
++            (view->baseline_warm_fence &&
++             !d3d12_baseline_matches(contract, baseline_reconstruction, device->ngx_parameters))) {
++            view->baseline_session = settings.quad_sr_selection.session;
++            view->baseline_warmup_attempted = false;
++            view->baseline_warm_fence = 0;
++        }
++        if (!create_shared_texture(*device, "center 1.0x output",
++                baseline_reconstruction.output_width, baseline_reconstruction.output_height,
++                output_desc.Format, D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS, slot.baseline_output)) {
++            release(context4);
++            return reject_transport(D3D11TransportStatus::resource_initialization_failed);
++        }
++        // Publish readiness only after all ring images exist and the warm-up finished.
++        baseline_ready = view->baseline_warm_fence &&
++            device->fence12->GetCompletedValue() >= view->baseline_warm_fence &&
++            std::all_of(view->slots.begin(), view->slots.end(), [&](const auto& entry) {
++                const auto& texture = entry.baseline_output;
++                return texture.resource12 && texture.width == baseline_reconstruction.output_width &&
++                    texture.height == baseline_reconstruction.output_height && texture.format == output_desc.Format;
++            });
++        report_quad_sr_prepared(settings.quad_sr_selection, settings.center_supersampling, baseline_ready);
++    } else {
++        release_shared_texture(slot.baseline_output);
++        if (view->baseline_warmup_attempted && std::all_of(view->slots.begin(), view->slots.end(),
++                [](const auto& entry) { return entry.baseline_output.resource12 == nullptr; })) {
++            release_d3d12_baseline(view_id);
++            trace_event("Automatic center SR released 1.0x resources view=%llu",
++                static_cast<unsigned long long>(view_id));
++            view->baseline_warmup_attempted = false;
++            view->baseline_warm_fence = 0;
++        }
++    }
++    // A stale eye falls back now; stereo readiness is rechecked next frame.
++    const bool baseline_active = baseline_ready && settings.quad_sr_selection.baseline;
++    auto& sr_output = baseline_active ? slot.baseline_output : slot.output;
++    const auto& sr_reconstruction = baseline_active ? baseline_reconstruction : reconstruction;
++    const bool sr_tier_changed = view->baseline_active != baseline_active;
+     TimingScope timing{context, slot};
+     bool fg_guides_ready{};
+     // Shader-only FG on a D3D11 game runs natively in the OpenXR layer and
+@@ -1910,7 +2000,8 @@ bool evaluate_d3d11_via_d3d12(
+     // this transport too (on with DLSS-NR) was pure overhead every frame.
+     // Universal DLSS 5 disables the native D3D11 FG backend (it needs the D3D12
+     // bridge), so DLSS-vector methods then take their guides from here too.
+-    const bool dlss_fg=fg_requires_d3d12(settings);
++    // Layer-owned Quad takes its guides from the four native evaluations.
++    const bool dlss_fg=fg_requires_d3d12(settings)&&!quad_layer_view_snapshot().active;
+     // Shared guides: the peripheral DLAA full-frame depth/motion below are the
+     // same depth conversion and MV box as the FG (and NR-before) guides.
+     const bool share_guides=settings.peripheral_dlaa_enabled;
+@@ -1963,7 +2054,9 @@ bool evaluate_d3d11_via_d3d12(
+     context->CopySubresourceRegion(slot.motion_vectors.texture11, 0U,
+         0U, 0U, 0U, motion, 0U, &mv_box);
+ 
+-    if (settings.peripheral_dlaa_enabled) {
++    const bool share_peripheral_color = settings.peripheral_dlaa_enabled &&
++        shares_peripheral_pre_sr_color(nr_before, render_width, render_height, out_width, out_height);
++    if (settings.peripheral_dlaa_enabled && !share_peripheral_color) {
+         D3D11_BOX peripheral_color_box{
+             color_x, color_y, 0U,
+             color_x + render_width,
+@@ -1974,6 +2067,8 @@ bool evaluate_d3d11_via_d3d12(
+             slot.peripheral_color.texture11, 0U,
+             0U, 0U, 0U, color, 0U, &peripheral_color_box
+         );
++    }
++    if (settings.peripheral_dlaa_enabled) {
+         if (!convert_depth_crop(
+                 *device, context, depth, depth_desc.Format,
+                 depth_x, depth_y,
+@@ -1999,12 +2094,7 @@ bool evaluate_d3d11_via_d3d12(
+ 
+     // NR before upscaling reads full-frame guides, identical to the peripheral ones.
+     const bool share_nr_guides = share_guides && nr_before;
+-    if (share_nr_guides) {
+-        if ((slot.nr_depth.resource12 || slot.nr_motion_vectors.resource12) && textures_retired()) {
+-            release_shared_texture(slot.nr_depth);
+-            release_shared_texture(slot.nr_motion_vectors);
+-        }
+-    } else if (settings.nr_enabled && (
++    if (settings.nr_enabled && !share_nr_guides && !reuse_sr_inputs_for_nr && (
+             (!slot.nr_depth.resource12 && !create_shared_texture(*device, "NR depth",
+                 nr_depth_capacity_x, nr_depth_capacity_y, DXGI_FORMAT_R32_FLOAT,
+                 D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS, slot.nr_depth)) ||
+@@ -2014,11 +2104,12 @@ bool evaluate_d3d11_via_d3d12(
+         release(context4);
+         return reject_transport(D3D11TransportStatus::resource_initialization_failed);
+     }
+-    ID3D12Resource* const nr_depth12 = share_nr_guides
+-        ? slot.peripheral_depth.resource12 : slot.nr_depth.resource12;
+-    ID3D12Resource* const nr_motion12 = share_nr_guides
+-        ? slot.peripheral_motion_vectors.resource12 : slot.nr_motion_vectors.resource12;
+-    if (settings.nr_enabled && !share_nr_guides) {
++    const auto& nr_color = reuse_sr_inputs_for_nr ? slot.color : slot.nr_color;
++    ID3D12Resource* const nr_depth12 = reuse_sr_inputs_for_nr ? slot.depth.resource12 :
++        share_nr_guides ? slot.peripheral_depth.resource12 : slot.nr_depth.resource12;
++    ID3D12Resource* const nr_motion12 = reuse_sr_inputs_for_nr ? slot.motion_vectors.resource12 :
++        share_nr_guides ? slot.peripheral_motion_vectors.resource12 : slot.nr_motion_vectors.resource12;
++    if (settings.nr_enabled && !nr_bypassed && !share_nr_guides && !reuse_sr_inputs_for_nr) {
+         if (!convert_depth_crop(
+                 *device, context, depth, depth_desc.Format,
+                 depth_x + nr_depth_x.base,
+@@ -2046,7 +2137,7 @@ bool evaluate_d3d11_via_d3d12(
+         );
+     }
+ 
+-    if (nr_before) {
++    if (nr_before && !nr_bypassed && !reuse_sr_inputs_for_nr) {
+         const D3D11_BOX nr_box{color_x, color_y, 0U,
+             color_x + render_width, color_y + render_height, 1U};
+         context->CopySubresourceRegion(slot.nr_color.texture11, 0U, 0U, 0U, 0U, color, 0U, &nr_box);
+@@ -2062,13 +2153,15 @@ bool evaluate_d3d11_via_d3d12(
+         return reject_transport(D3D11TransportStatus::synchronization_failed);
+     }
+ 
+-    transition(device->command_list12, slot.color.resource12,
+-        D3D12_RESOURCE_STATE_COMMON, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
++    if (!reuse_sr_inputs_for_nr) {
++        transition(device->command_list12, slot.color.resource12,
++            D3D12_RESOURCE_STATE_COMMON, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
++    }
+     transition(device->command_list12, slot.depth.resource12,
+         D3D12_RESOURCE_STATE_COMMON, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+     transition(device->command_list12, slot.motion_vectors.resource12,
+         D3D12_RESOURCE_STATE_COMMON, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+-    transition(device->command_list12, slot.output.resource12,
++    transition(device->command_list12, sr_output.resource12,
+         D3D12_RESOURCE_STATE_COMMON, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+ 
+     const bool measure_dlss = slot.dlss_timing_heap != nullptr &&
+@@ -2082,17 +2175,26 @@ bool evaluate_d3d11_via_d3d12(
+     }
+ 
+     bool nr_before_succeeded{};
+-    if (nr_before) {
++    if (nr_bypassed) {
++        // Keep the shared input layout and SR history across a faded NR bypass.
++        nr_attempt.attempted = true;
++        bypass_dlss_nr(contract.view_id);
++        if (reuse_sr_inputs_for_nr)
++            transition(device->command_list12, slot.color.resource12,
++                D3D12_RESOURCE_STATE_COMMON, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
++    } else if (nr_before) {
+         if (measure_dlss) device->command_list12->EndQuery(slot.dlss_timing_heap, D3D12_QUERY_TYPE_TIMESTAMP, 4U);
+         slot.dlss_nr_timing_foveated = settings.nr_foveated;
+-        transition(device->command_list12, slot.nr_color.resource12,
++        transition(device->command_list12, nr_color.resource12,
+             D3D12_RESOURCE_STATE_COMMON, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+-        transition(device->command_list12, nr_depth12,
+-            D3D12_RESOURCE_STATE_COMMON, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+-        transition(device->command_list12, nr_motion12,
+-            D3D12_RESOURCE_STATE_COMMON, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
++        if (!reuse_sr_inputs_for_nr) {
++            transition(device->command_list12, nr_depth12,
++                D3D12_RESOURCE_STATE_COMMON, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
++            transition(device->command_list12, nr_motion12,
++                D3D12_RESOURCE_STATE_COMMON, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
++        }
+         DlssNrFrame nr_frame{contract.view_id, DlssNrRoute::d3d11_transport,
+-            device->command_list12, slot.nr_color.resource12, D3D12_RESOURCE_STATE_UNORDERED_ACCESS,
++            device->command_list12, nr_color.resource12, D3D12_RESOURCE_STATE_UNORDERED_ACCESS,
+             nr_depth12, nr_motion12,
+             render_width, render_height, out_width, out_height,
+             0U, 0U, render_width, render_height, 0U, 0U, nr_motion_width, nr_motion_height,
+@@ -2109,21 +2211,26 @@ bool evaluate_d3d11_via_d3d12(
+         nr_frame.center = nr_center;
+         nr_frame.has_center = has_nr_center;
+         nr_frame.reset = nr_frame.reset || nr_gaze_reset;
++        nr_frame.active_working_scale = settings.quad_nr_selection.active_scale;
++        nr_frame.result_weight = settings.quad_nr_selection.result_weight;
+         auto processing_settings = nr_settings;
+         processing_settings.nr_alignment_border_enabled = false;
+         nr_attempt.attempted = true;
+         nr_before_succeeded = evaluate_dlss_nr(nr_frame, processing_settings);
+-        transition(device->command_list12, nr_depth12,
+-            D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE, D3D12_RESOURCE_STATE_COMMON);
+-        transition(device->command_list12, nr_motion12,
+-            D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE, D3D12_RESOURCE_STATE_COMMON);
+-        transition(device->command_list12, slot.nr_color.resource12,
+-            D3D12_RESOURCE_STATE_UNORDERED_ACCESS, D3D12_RESOURCE_STATE_COPY_SOURCE);
+-        if (nr_before_succeeded) {
++        if (!reuse_sr_inputs_for_nr) {
++            transition(device->command_list12, nr_depth12,
++                D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE, D3D12_RESOURCE_STATE_COMMON);
++            transition(device->command_list12, nr_motion12,
++                D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE, D3D12_RESOURCE_STATE_COMMON);
++        }
++        const bool copy_nr_crop = nr_before_succeeded && !reuse_sr_inputs_for_nr;
++        if (copy_nr_crop) {
++            transition(device->command_list12, nr_color.resource12,
++                D3D12_RESOURCE_STATE_UNORDERED_ACCESS, D3D12_RESOURCE_STATE_COPY_SOURCE);
+             transition(device->command_list12, slot.color.resource12,
+                 D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE, D3D12_RESOURCE_STATE_COPY_DEST);
+             D3D12_TEXTURE_COPY_LOCATION source{}, destination{};
+-            source.pResource = slot.nr_color.resource12;
++            source.pResource = nr_color.resource12;
+             destination.pResource = slot.color.resource12;
+             source.Type = destination.Type = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;
+             const D3D12_BOX box{crop.input_base_x, crop.input_base_y, 0U,
+@@ -2132,14 +2239,28 @@ bool evaluate_d3d11_via_d3d12(
+             transition(device->command_list12, slot.color.resource12,
+                 D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+         }
+-        transition(device->command_list12, slot.nr_color.resource12,
+-            D3D12_RESOURCE_STATE_COPY_SOURCE, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
++        // Decode writes the shared color only on success; on failure SR reads
++        // the same texture with the original input still intact.
++        transition(device->command_list12, nr_color.resource12,
++            copy_nr_crop ? D3D12_RESOURCE_STATE_COPY_SOURCE : D3D12_RESOURCE_STATE_UNORDERED_ACCESS,
++            D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+     }
+-    if (nr_before && measure_dlss) {
++    if (nr_before && !nr_bypassed && measure_dlss) {
+         device->command_list12->EndQuery(slot.dlss_timing_heap, D3D12_QUERY_TYPE_TIMESTAMP, 5U);
+         device->command_list12->ResolveQueryData(slot.dlss_timing_heap, D3D12_QUERY_TYPE_TIMESTAMP,
+             4U, 2U, slot.dlss_timing_readback, 4U * sizeof(std::uint64_t));
+     }
++    if (nr_before && settings.quad_automatic_nr &&
++        (nr_bypassed || (nr_before_succeeded && settings.quad_nr_selection.result_weight==1.0F))) {
++        const auto active = settings.quad_nr_selection.active_scale;
++        const auto scale = nr_bypassed ? 0.0F : active>0.0F ? active : settings.nr_working_scale;
++        if (view->automatic_nr_scale != scale) {
++            view->automatic_nr_scale = scale;
++            trace_event("Automatic NR view=%llu settled scale=%.2fx", static_cast<unsigned long long>(view_id), scale);
++        }
++    } else if (!nr_before || !settings.quad_automatic_nr) {
++        view->automatic_nr_scale = -1.0F;
++    }
+     struct InputHistoryCompletion {
+         DlssViewId view;
+         NrProcessingOrder order;
+@@ -2149,13 +2270,14 @@ bool evaluate_d3d11_via_d3d12(
+             if (!complete) static_cast<void>(dlss_nr_input_history_reset(view, order, false, width, height));
+         }
+     } input_completion{contract.view_id, settings.nr_processing_order, render_width, render_height};
++    // A downstream SR tier change only resets SR history.
+     contract.reset = dlss_nr_input_history_reset(contract.view_id, settings.nr_processing_order,
+-        nr_before_succeeded, render_width, render_height) || contract.reset;
++        nr_before_succeeded || nr_bypassed, render_width, render_height) || contract.reset || sr_tier_changed;
+ 
+     PeripheralDlaaResources peripheral{};
+     bool peripheral_ready{};
+     if (settings.peripheral_dlaa_enabled) {
+-        transition(
++        if (!share_peripheral_color) transition(
+             device->command_list12, slot.peripheral_color.resource12,
+             D3D12_RESOURCE_STATE_COMMON,
+             D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE
+@@ -2179,7 +2301,9 @@ bool evaluate_d3d11_via_d3d12(
+         PeripheralDlaaRequest peripheral_request{};
+         peripheral_request.view_id = contract.view_id;
+         peripheral_request.command_list = device->command_list12;
+-        peripheral_request.color = nr_before_succeeded ? slot.nr_color.resource12 : slot.peripheral_color.resource12;
++        // A failed NR evaluation leaves the original color in the shared input.
++        peripheral_request.color = nr_before_succeeded || share_peripheral_color
++            ? nr_color.resource12 : slot.peripheral_color.resource12;
+         peripheral_request.depth = slot.peripheral_depth.resource12;
+         peripheral_request.motion_vectors =
+             slot.peripheral_motion_vectors.resource12;
+@@ -2245,7 +2369,7 @@ bool evaluate_d3d11_via_d3d12(
+             D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE,
+             D3D12_RESOURCE_STATE_COMMON
+         );
+-        transition(
++        if (!share_peripheral_color) transition(
+             device->command_list12, slot.peripheral_color.resource12,
+             D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE,
+             D3D12_RESOURCE_STATE_COMMON
+@@ -2256,8 +2380,10 @@ bool evaluate_d3d11_via_d3d12(
+     inputs.color = slot.color.resource12;
+     inputs.depth = slot.depth.resource12;
+     inputs.motion_vectors = slot.motion_vectors.resource12;
+-    inputs.output = slot.output.resource12;
+-    mirror_transport_parameters(device->ngx_parameters, parameters, contract);
++    inputs.output = sr_output.resource12;
++    inputs.baseline_feature = baseline_active;
++    if (!prepare_sr_baseline || settings.peripheral_dlaa_enabled)
++        mirror_transport_parameters(device->ngx_parameters, parameters, contract);
+     if (measure_dlss) {
+         device->command_list12->EndQuery(
+             slot.dlss_timing_heap,
+@@ -2269,7 +2395,7 @@ bool evaluate_d3d11_via_d3d12(
+     backend_timing.query_heap = measure_dlss ? slot.dlss_timing_heap : nullptr;
+     result = evaluate_d3d12_backend(
+         device->command_list12, contract, inputs,
+-        device->ngx_parameters, reconstruction, ngx.backend,
++        device->ngx_parameters, sr_reconstruction, ngx.backend,
+         &backend_timing, &crop
+     );
+     if (measure_dlss) {
+@@ -2289,7 +2415,7 @@ bool evaluate_d3d11_via_d3d12(
+             0U
+         );
+         slot.dlss_timing_query_count =
+-            nr_before ? 6U : slot.dlss_peripheral_timing_recorded ? 4U : 2U;
++            nr_before && !nr_bypassed ? 6U : slot.dlss_peripheral_timing_recorded ? 4U : 2U;
+     }
+ 
+     if(fg_guides_ready && ngx_succeeded(result)) {
+@@ -2311,7 +2437,25 @@ bool evaluate_d3d11_via_d3d12(
+         transition(device->command_list12,fg_depth12,D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE,D3D12_RESOURCE_STATE_COMMON);
+         transition(device->command_list12,fg_motion12,D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE,D3D12_RESOURCE_STATE_COMMON);
+     }
+-    transition(device->command_list12, slot.output.resource12,
++    bool baseline_warmed{};
++    if (prepare_sr_baseline && !baseline_active && !view->baseline_warmup_attempted && ngx_succeeded(result)) {
++        view->baseline_warmup_attempted = true;
++        const auto warmup_start = GetTickCount64();
++        auto warm_contract = contract;
++        warm_contract.reset = true;
++        auto warm_inputs = inputs;
++        warm_inputs.output = slot.baseline_output.resource12;
++        warm_inputs.baseline_feature = true;
++        transition(device->command_list12, warm_inputs.output,
++            D3D12_RESOURCE_STATE_COMMON, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
++        baseline_warmed = ngx_succeeded(evaluate_d3d12_backend(device->command_list12,
++            warm_contract, warm_inputs, device->ngx_parameters, baseline_reconstruction, ngx.backend, nullptr, &crop));
++        trace_event("Automatic center SR prepare view=%llu recording_ms=%llu ready=%u",
++            static_cast<unsigned long long>(view_id), GetTickCount64() - warmup_start, unsigned(baseline_warmed));
++        transition(device->command_list12, warm_inputs.output,
++            D3D12_RESOURCE_STATE_UNORDERED_ACCESS, D3D12_RESOURCE_STATE_COMMON);
++    }
++    transition(device->command_list12, sr_output.resource12,
+         D3D12_RESOURCE_STATE_UNORDERED_ACCESS, D3D12_RESOURCE_STATE_COMMON);
+     transition(device->command_list12, slot.motion_vectors.resource12,
+         D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE, D3D12_RESOURCE_STATE_COMMON);
+@@ -2319,7 +2463,7 @@ bool evaluate_d3d11_via_d3d12(
+         D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE, D3D12_RESOURCE_STATE_COMMON);
+     transition(device->command_list12, slot.color.resource12,
+         D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE, D3D12_RESOURCE_STATE_COMMON);
+-    if (nr_before) transition(device->command_list12, slot.nr_color.resource12,
++    if (nr_before && !nr_bypassed && !reuse_sr_inputs_for_nr) transition(device->command_list12, nr_color.resource12,
+         D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE, D3D12_RESOURCE_STATE_COMMON);
+     if (FAILED(device->command_list12->Close())) {
+         release(context4);
+@@ -2336,13 +2480,14 @@ bool evaluate_d3d11_via_d3d12(
+         release(context4);
+         return reject_transport(D3D11TransportStatus::synchronization_failed);
+     }
++    if (baseline_warmed) view->baseline_warm_fence = slot.done_value;
+     if (!ngx_succeeded(result)) {
+         slot.dlss_timing_pending = measure_dlss;
+         release(context4);
+         return reject_transport(D3D11TransportStatus::ngx_evaluation_failed);
+     }
+     auto composite_contract = contract;
+-    ID3D11Resource* composite_base = nr_before_succeeded ? slot.nr_color.texture11 : color;
++    ID3D11Resource* composite_base = nr_before_succeeded ? nr_color.texture11 : color;
+     if (nr_before_succeeded) {
+         composite_contract.color_base_x = 0U;
+         composite_contract.color_base_y = 0U;
+@@ -2370,7 +2515,7 @@ bool evaluate_d3d11_via_d3d12(
+             context,
+             composite_base,
+             output,
+-            slot.output.texture11,
++            sr_output.texture11,
+             composite_contract,
+             crop,
+             composite_settings
+@@ -2379,6 +2524,14 @@ bool evaluate_d3d11_via_d3d12(
+         release(context4);
+         return reject_transport(D3D11TransportStatus::compositing_failed);
+     }
++    const float applied_sr_scale = baseline_active ? 1.0F : settings.center_supersampling;
++    if (sr_tier_changed) {
++        trace_event("Automatic center SR view=%llu scale=%.2fx",
++            static_cast<unsigned long long>(view_id), applied_sr_scale);
++    }
++    view->baseline_active = baseline_active;
++    if (settings.quad_automatic_sr && settings.enabled && settings.quad_sr_selection.session)
++        report_quad_sr_applied(settings.quad_sr_selection, applied_sr_scale);
+ 
+     bool nr_succeeded{};
+     if (settings.nr_enabled && !nr_before) {
+diff --git a/src/d3d12_backend.cpp b/src/d3d12_backend.cpp
+index 2f28028..1bc3e72 100644
+--- a/src/d3d12_backend.cpp
++++ b/src/d3d12_backend.cpp
+@@ -46,6 +46,7 @@ struct CanonicalFeatureKey {
+ 
+ struct CanonicalViewState {
+     DlssViewId view_id{};
++    bool baseline_feature{};
+     CanonicalFeatureKey key{};
+     NgxHandle* private_handle{};
+     D3D12ReleaseFeatureFn release_feature{};
+@@ -111,9 +112,9 @@ std::array<
+         left.fix_motion_blur == right.fix_motion_blur;
+ }
+ 
+-[[nodiscard]] CanonicalViewState* find_view(const DlssViewId view_id) noexcept {
++[[nodiscard]] CanonicalViewState* find_view(const DlssViewId view_id, bool baseline_feature) noexcept {
+     for (auto& view : canonical_views) {
+-        if (view.view_id == view_id) return &view;
++        if (view.view_id == view_id && view.baseline_feature == baseline_feature) return &view;
+     }
+     return nullptr;
+ }
+@@ -733,7 +734,7 @@ struct D3D12Evaluation {
+ 
+ void skip_d3d12_history(const DlssViewId view_id) noexcept {
+     std::lock_guard lock(canonical_views_mutex);
+-    if (auto* view = find_view(view_id)) view->has_crop = false;
++    for (auto& view : canonical_views) if (view.view_id == view_id) view.has_crop = false;
+ }
+ 
+ D3D12Evaluation* prepare_d3d12(
+@@ -1705,11 +1706,12 @@ NgxResult evaluate_d3d12_backend(
+     NgxResult result = 0xBAD00005U;
+     {
+         std::lock_guard lock(canonical_views_mutex);
+-        auto* view = find_view(contract.view_id);
++        auto* view = find_view(contract.view_id, inputs.baseline_feature);
+         if (view == nullptr) {
+             canonical_views.push_back(CanonicalViewState{});
+             view = &canonical_views.back();
+             view->view_id = contract.view_id;
++            view->baseline_feature = inputs.baseline_feature;
+         }
+ 
+         const bool pack_motion = inputs.fix_motion_blur &&
+@@ -1883,14 +1885,14 @@ NgxResult evaluate_d3d12_backend(
+     return result;
+ }
+ 
+-void release_d3d12_view(const DlssViewId view_id) noexcept {
++static void release_d3d12_variant(const DlssViewId view_id, bool baseline_feature) noexcept {
+     NgxHandle* handle{};
+     D3D12ReleaseFeatureFn release{};
+     {
+         std::lock_guard lock(canonical_views_mutex);
+         for (auto iterator = canonical_views.begin();
+              iterator != canonical_views.end(); ++iterator) {
+-            if (iterator->view_id != view_id) continue;
++            if (iterator->view_id != view_id || iterator->baseline_feature != baseline_feature) continue;
+             handle = iterator->private_handle;
+             release = iterator->release_feature;
+             canonical_views.erase(iterator);
+@@ -1900,6 +1902,23 @@ void release_d3d12_view(const DlssViewId view_id) noexcept {
+     if (handle != nullptr && release != nullptr) {
+         static_cast<void>(release(handle));
+     }
++}
++
++void release_d3d12_baseline(const DlssViewId view_id) noexcept {
++    release_d3d12_variant(view_id, true);
++}
++
++bool d3d12_baseline_matches(const DlssFrameContract& contract, const CropGeometry& crop,
++    const NgxParameters* parameters) noexcept {
++    const auto key = make_key(contract, crop, parameters);
++    std::lock_guard lock(canonical_views_mutex);
++    const auto* view = find_view(contract.view_id, true);
++    return view && view->private_handle && view->has_key && same_key(view->key, key);
++}
++
++void release_d3d12_view(const DlssViewId view_id) noexcept {
++    release_d3d12_variant(view_id, false);
++    release_d3d12_baseline(view_id);
+     release_dlss_nr_view(view_id);
+ }
+ 
+diff --git a/src/dlss_nr.cpp b/src/dlss_nr.cpp
+index f971055..6f1731f 100644
+--- a/src/dlss_nr.cpp
++++ b/src/dlss_nr.cpp
+@@ -961,7 +961,9 @@ void dispatch_codec(
+     const std::uint32_t source_descriptor,
+     const std::uint32_t destination_descriptor,
+     const Settings& settings,
+-    const NrRegion& region
++    const NrRegion& region,
++    const std::uint32_t active_width,
++    const std::uint32_t active_height
+ ) noexcept {
+     ID3D12DescriptorHeap* heaps[]{gpu.descriptors};
+     frame.command_list->SetDescriptorHeaps(1U, heaps);
+@@ -984,10 +986,10 @@ void dispatch_codec(
+         {width, height},
+         {width, height},
+         {region.base_x, region.base_y},
+-        {gpu.working_width, gpu.working_height},
++        {active_width, active_height},
+         settings.nr_paper_white_scale,
+         settings.nr_hdr_transfer_strength,
+-        settings.nr_color_strength,
++        settings.nr_color_strength * frame.result_weight,
+         (frame.create_flags & 1U) != 0U ? 1U : 0U,
+         {0U, 0U},
+         {width, height},
+@@ -1005,8 +1007,8 @@ void dispatch_codec(
+         D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+     std::memcpy(constants.mask_bounds, region.mask.bounds, sizeof(constants.mask_bounds));
+     frame.command_list->SetComputeRoot32BitConstants(2U, 40U, &constants, 0U);
+-    const auto dispatch_width = (std::max)(width, gpu.working_width);
+-    const auto dispatch_height = (std::max)(height, gpu.working_height);
++    const auto dispatch_width = (std::max)(width, active_width);
++    const auto dispatch_height = (std::max)(height, active_height);
+     frame.command_list->Dispatch(
+         (dispatch_width + 15U) / 16U,
+         (dispatch_height + 15U) / 16U,
+@@ -1162,8 +1164,12 @@ bool evaluate_dlss_nr(
+         frame.input_height,
+         frame.has_center ? &frame.center : nullptr
+     );
+-    const auto working_width = scaled_extent(region.width, settings.nr_working_scale);
+-    const auto working_height = scaled_extent(region.height, settings.nr_working_scale);
++    const auto capacity_width = scaled_extent(region.width, settings.nr_working_scale);
++    const auto capacity_height = scaled_extent(region.height, settings.nr_working_scale);
++    const auto active_scale = frame.active_working_scale > 0.0F
++        ? (std::min)(frame.active_working_scale, settings.nr_working_scale) : settings.nr_working_scale;
++    const auto working_width = scaled_extent(region.width, active_scale);
++    const auto working_height = scaled_extent(region.height, active_scale);
+     NrRegion codec_region = region;
+     const auto resource_base = dlss_nr_resource_base(
+         region.base_x,
+@@ -1182,15 +1188,15 @@ bool evaluate_dlss_nr(
+         return false;
+     }
+     if (!record_use(view, frame.command_list)) return false;
+-    if (!create_feature(view, frame, settings, working_width, working_height)) {
++    if (!create_feature(view, frame, settings, capacity_width, capacity_height)) {
+         return false;
+     }
+     auto* const gpu = find_or_create_gpu(
+         view,
+         frame,
+         codec_region,
+-        working_width,
+-        working_height
++        capacity_width,
++        capacity_height
+     );
+     if (gpu == nullptr) return false;
+     const auto depth_x = frame.color_is_region
+@@ -1362,7 +1368,7 @@ bool evaluate_dlss_nr(
+         auto& pass_view = find_or_create_view(frame.view_id, pass);
+         auto pass_settings = nr_pass_settings(settings, pass);
+         if (!record_use(pass_view, frame.command_list) ||
+-            !create_feature(pass_view, frame, pass_settings, working_width, working_height)) break;
++            !create_feature(pass_view, frame, pass_settings, capacity_width, capacity_height)) break;
+         // Chain the signature so a change to an earlier pass resets later ones.
+         const auto pass_signature = (passes[pass - 1U].signature * 1099511628211ULL) ^
+             nr_settings_signature(pass_settings, region);
+@@ -1389,7 +1395,9 @@ bool evaluate_dlss_nr(
+         0U,
+         4U,
+         settings,
+-        codec_region
++        codec_region,
++        working_width,
++        working_height
+     );
+     uav_barrier(frame.command_list, gpu->original_output);
+     uav_barrier(frame.command_list, gpu->color_proxy);
+@@ -1487,7 +1495,7 @@ bool evaluate_dlss_nr(
+     diagnostics.working_height = working_height;
+     diagnostics.intermediate_vram_bytes =
+         static_cast<std::uint64_t>(region.width) * region.height * 8U +
+-        static_cast<std::uint64_t>(working_width) * working_height *
++        static_cast<std::uint64_t>(capacity_width) * capacity_height *
+             (gpu->pass_output ? 36U : 28U);
+     if (!ngx_succeeded(result)) {
+         // All or nothing: a partial chain never reaches the game image.
+@@ -1537,7 +1545,9 @@ bool evaluate_dlss_nr(
+         1U,
+         6U,
+         settings,
+-        codec_region
++        codec_region,
++        working_width,
++        working_height
+     );
+     uav_barrier(frame.command_list, frame.color);
+     transition(
+@@ -1630,7 +1640,7 @@ void draw_dlss_nr_border(const DlssNrFrame& input_frame, const Settings& input_s
+     auto* gpu = find_or_create_gpu(view, frame, region, 8U, 8U, true);
+     if (!gpu || !record_use(view, frame.command_list)) return;
+     transition(frame.command_list, frame.color, frame.color_state, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+-    dispatch_codec(frame, *gpu, gpu->border_pipeline, 1U, 6U, settings, region);
++    dispatch_codec(frame, *gpu, gpu->border_pipeline, 1U, 6U, settings, region, 8U, 8U);
+     uav_barrier(frame.command_list, frame.color);
+     transition(frame.command_list, frame.color, D3D12_RESOURCE_STATE_UNORDERED_ACCESS, frame.color_state);
+ }
+@@ -1671,6 +1681,14 @@ void skip_dlss_nr_history(const DlssViewId view_id) noexcept {
+     for (auto& view : views) if (view.view_id == view_id) view.was_enabled = false;
+ }
+ 
++void bypass_dlss_nr(const DlssViewId view_id) noexcept {
++    std::lock_guard lock(nr_mutex);
++    for (auto& view : views) if (view.view_id == view_id) view.was_enabled = false;
++    diagnostics.state = DlssNrState::bypassed;
++    diagnostics.skip_reason = nullptr;
++    diagnostics.working_width = diagnostics.working_height = 0;
++}
++
+ void release_dlss_nr_view(const DlssViewId view_id) noexcept {
+     std::lock_guard execution_lock(calibration12_execution_mutex());
+     release_dlss_nr_inputs(view_id);
+@@ -1729,6 +1747,7 @@ const char* dlss_nr_state_name(const DlssNrState state) noexcept {
+     switch (state) {
+     case DlssNrState::waiting: return "Waiting for a compatible DLSS frame";
+     case DlssNrState::disabled: return "Disabled";
++    case DlssNrState::bypassed: return "Bypassed";
+     case DlssNrState::runtime_missing: return "nvngx_dlssnr.dll could not load beside the processing DLL or game executable; see log";
+     case DlssNrState::runtime_failed: return "DLSS-NR runtime initialization failed";
+     case DlssNrState::unsupported_resources: return "Unsupported or missing depth, motion, or output resource";
+diff --git a/src/dlss_nr.hpp b/src/dlss_nr.hpp
+index 3a26cca..de063e2 100644
+--- a/src/dlss_nr.hpp
++++ b/src/dlss_nr.hpp
+@@ -27,6 +27,7 @@ enum class DlssNrState : std::uint32_t {
+     evaluation_failed,
+     active,
+     input_preparation_failed,
++    bypassed,
+ };
+ 
+ struct DlssNrFrame {
+@@ -77,6 +78,9 @@ struct DlssNrFrame {
+     std::uint32_t motion_full_width{}, motion_full_height{}, depth_full_width{}, depth_full_height{};
+     std::uint32_t motion_copy_x{}, motion_copy_y{}, depth_copy_x{}, depth_copy_y{};
+     std::uint32_t view_output_base_x{}, view_output_base_y{}; // Retained when Before NR switches color to input space.
++    // A smaller active region may use the same model and textures as the configured scale.
++    float active_working_scale{};
++    float result_weight{1.0F};
+ };
+ 
+ // Universal DLSS 5 as last reported by the OpenXR layer.
+@@ -128,6 +132,7 @@ void draw_dlss_nr_border(const DlssNrFrame& frame, const Settings& settings) noe
+ 
+ void release_dlss_nr_view(DlssViewId view_id) noexcept;
+ void skip_dlss_nr_history(DlssViewId view_id) noexcept;
++void bypass_dlss_nr(DlssViewId view_id) noexcept;
+ void release_dlss_nr_resources() noexcept;
+ void reset_dlss_nr() noexcept;
+ 
+diff --git a/src/frame_contract.hpp b/src/frame_contract.hpp
+index f8f087e..0aa8779 100644
+--- a/src/frame_contract.hpp
++++ b/src/frame_contract.hpp
+@@ -58,6 +58,7 @@ struct D3D12DlssInputs {
+     std::uint32_t mv_base_y{};
+     std::uint32_t output_base_x{};
+     std::uint32_t output_base_y{};
++    bool baseline_feature{}; // Prepared 1.0x center SR uses its own size-bound NGX handle.
+ };
+ 
+ }  // namespace cheeky::foveated_dlss
+diff --git a/src/hooks.cpp b/src/hooks.cpp
+index 5ba9cde..69f7a4a 100644
+--- a/src/hooks.cpp
++++ b/src/hooks.cpp
+@@ -54,6 +54,7 @@
+ #include <deque>
+ #include <iterator>
+ #include <mutex>
++#include <unordered_map>
+ #include <vector>
+ 
+ namespace cheeky::foveated_dlss {
+@@ -4090,6 +4091,61 @@ NgxResult traced_feature_create(Fn original, Context context, std::uint32_t feat
+     return result;
+ }
+ 
++using D3D11GameRelease = NgxResult (*)(NgxHandle*);
++NgxResult release_d3d11_game_feature(NgxHandle*, D3D11GameRelease);
++
++using ReleaseLifecycleCallback = void (*)(std::uint32_t, std::uint64_t);
++enum ReleaseLifecycleEvent : std::uint32_t { feature_created = 1, feature_evaluated = 2, feature_released = 3 };
++struct NativeReleaseView {
++    D3D11GameRelease release;
++    bool released;
++};
++std::atomic<ReleaseLifecycleCallback> release_lifecycle_callback{};
++std::recursive_mutex release_lifecycle_mutex;
++std::unordered_map<const NgxHandle*, NativeReleaseView> native_release_views;
++std::vector<const NgxHandle*> release_requests;
++thread_local const NgxHandle* native_release_in_progress{};
++thread_local bool release_lifecycle_transport_submitted{};
++
++void release_lifecycle_created(const NgxHandle* handle, D3D11GameRelease release, bool preserve_existing = false) {
++    const auto callback = release_lifecycle_callback.load(std::memory_order_acquire);
++    if (!callback) return;
++    std::lock_guard lock(release_lifecycle_mutex);
++    // The core entry can forward Create to the public runtime. Preserve the
++    // public runtime's release callback when the enclosing core call returns.
++    const auto existing = native_release_views.find(handle);
++    if (existing != native_release_views.end() && !existing->second.released) {
++        if (!preserve_existing) existing->second.release = release;
++        return;
++    }
++    native_release_views.insert_or_assign(handle, NativeReleaseView{release, false});
++    callback(feature_created, reinterpret_cast<std::uintptr_t>(handle));
++}
++
++bool retired_handle_reused(const NgxHandle* handle, const char* operation) {
++    const auto view = native_release_views.find(handle);
++    if (view == native_release_views.end() || !view->second.released) return false;
++    trace_event("Feature lifecycle: retired handle %p received %s", handle, operation);
++    return true;
++}
++
++void apply_feature_releases(const NgxHandle* current, ReleaseLifecycleCallback callback) {
++    if (release_requests.empty()) return;
++    auto requests = std::move(release_requests);
++    release_requests.clear();
++    for (auto* old_handle : requests) {
++        if (old_handle == current) continue;
++        const auto view = native_release_views.find(old_handle);
++        if (view == native_release_views.end() || view->second.released) continue;
++        native_release_in_progress = old_handle;
++        const auto result = release_d3d11_game_feature(const_cast<NgxHandle*>(old_handle), view->second.release);
++        native_release_in_progress = nullptr;
++        view->second.released = ngx_succeeded(result);
++        if (view->second.released) callback(feature_released, reinterpret_cast<std::uintptr_t>(old_handle));
++        trace_event("Feature lifecycle: released handle %p result=0x%08X", old_handle, result);
++    }
++}
++
+ NgxResult runtime_create_d3d11(const D3D11RuntimeCallbacks& runtime,
+     ID3D11DeviceContext* const context,
+     const std::uint32_t feature,
+@@ -4107,6 +4163,7 @@ NgxResult runtime_create_d3d11(const D3D11RuntimeCallbacks& runtime,
+     const auto result = traced_feature_create(original, context, feature, parameters, handle, 0);
+     if (ngx_succeeded(result) && handle != nullptr && *handle != nullptr &&
+         feature == 1U) {
++        release_lifecycle_created(*handle, runtime.release.load(std::memory_order_acquire));
+         fg_remember_feature(*handle,parameters);
+         register_d3d11_game_feature(
+             *handle,
+@@ -4136,6 +4193,7 @@ NgxResult hook_core_create_d3d11(
+     const auto result = traced_feature_create(original, context, feature, parameters, handle, 1);
+     if (ngx_succeeded(result) && handle != nullptr && *handle != nullptr &&
+         feature == 1U) {
++        release_lifecycle_created(*handle, real_core_release_d3d11.load(std::memory_order_acquire), true);
+         fg_remember_feature(*handle,parameters);
+         register_d3d11_game_feature(
+             *handle,
+@@ -4215,6 +4273,7 @@ NgxResult evaluate_d3d11_impl(const D3D11RuntimeCallbacks& runtime,
+             );
+             diagnostic_note_state(DiagnosticApi::d3d11, DiagnosticState::active);
+             diagnostic_note_result(DiagnosticApi::d3d11, transport_result);
++            release_lifecycle_transport_submitted = ngx_succeeded(transport_result);
+             return transport_result;
+         }
+     }
+@@ -4368,6 +4427,7 @@ NgxResult evaluate_d3d11_c_impl(const D3D11RuntimeCallbacks& runtime,
+             );
+             diagnostic_note_state(DiagnosticApi::d3d11, DiagnosticState::active);
+             diagnostic_note_result(DiagnosticApi::d3d11, transport_result);
++            release_lifecycle_transport_submitted = ngx_succeeded(transport_result);
+             return transport_result;
+         }
+     }
+@@ -4489,11 +4549,9 @@ NgxResult evaluate_with_eye_calibration(ID3D11DeviceContext* context, const NgxH
+     // All temporary NGX parameters and private composites have been restored
+     // before this point. Tag only the outer game evaluation's final output.
+     if (depth.outer && ngx_succeeded(result) && parameters && !is_d3d11_private_handle(handle)) {
+-        ID3D11Resource *output{}, *color{}, *z{}, *motion{};
++        ID3D11Resource *output{}, *color{};
+         if (ngx_succeeded(parameters->Get("Output", &output)) && output &&
+-            ngx_succeeded(parameters->Get("Color", &color)) && color &&
+-            ngx_succeeded(parameters->Get("Depth", &z)) && z &&
+-            ngx_succeeded(parameters->Get("MotionVectors", &motion)) && motion) {
++            ngx_succeeded(parameters->Get("Color", &color)) && color) {
+             const auto settings=current_settings();quad_view_configure(settings.quad_manual_assignment,settings.quad_show_numbers,settings.quad_saved_roles.data(),settings.quad_saved_source_count);
+             Microsoft::WRL::ComPtr<ID3D11Texture2D> texture;output->QueryInterface(IID_PPV_ARGS(&texture));
+             CheekyQuadSourceD3D11V1 source{};source.version=CHEEKY_QUAD_VIEWS_VERSION;source.size=sizeof(source);
+@@ -4501,15 +4559,13 @@ NgxResult evaluate_with_eye_calibration(ID3D11DeviceContext* context, const NgxH
+             source.context=context;source.texture=texture.Get();source.x=get_ui(parameters,"DLSS.Output.Subrect.Base.X");source.y=get_ui(parameters,"DLSS.Output.Subrect.Base.Y");
+             source.width=get_ui(parameters,"OutWidth");source.height=get_ui(parameters,"OutHeight");
+             if(!quad_view_observe11(source)&&eye_calibration_enabled())eye_calibration_stamp(context, output, source.dlss_view,source.x,source.y,source.width,source.height);
+-            fg_publish_shader11(context,handle,parameters);
+-            fg_publish_quad11(context,handle,parameters);
++            fg_publish_d3d11(context,handle,parameters);
+         }
+     }
+     return result;
+ }
+-NgxResult runtime_release_d3d11(const D3D11RuntimeCallbacks& runtime, NgxHandle* const handle) {
++NgxResult release_d3d11_game_feature(NgxHandle* const handle, D3D11GameRelease original) {
+     fg_forget_feature(handle);
+-    const auto original = runtime.release.load(std::memory_order_acquire);
+     release_d3d11_transport_view(handle);
+     release_d3d11_peripheral_dlaa_view(handle);
+     unregister_d3d11_game_feature(handle);
+@@ -4521,6 +4577,31 @@ NgxResult runtime_release_d3d11(const D3D11RuntimeCallbacks& runtime, NgxHandle*
+     return original == nullptr ? 0xBAD00007U : original(handle);
+ }
+ 
++template<class Invoke>
++NgxResult evaluate_release_lifecycle(const NgxHandle* handle, Invoke invoke) {
++    const auto callback = release_lifecycle_callback.load(std::memory_order_acquire);
++    if (!callback) return invoke();
++    std::lock_guard lock(release_lifecycle_mutex);
++    if (retired_handle_reused(handle, "Evaluate")) return 0xBAD00007U;
++    release_lifecycle_transport_submitted = false;
++    const auto result = invoke();
++    if (release_lifecycle_transport_submitted && native_release_views.contains(handle)) {
++        callback(feature_evaluated, reinterpret_cast<std::uintptr_t>(handle));
++        apply_feature_releases(handle, callback);
++    }
++    return result;
++}
++
++template<class Invoke>
++NgxResult game_release_lifecycle(NgxHandle* handle, Invoke invoke) {
++    const auto callback = release_lifecycle_callback.load(std::memory_order_acquire);
++    if (!callback || native_release_in_progress == handle) return invoke();
++    std::lock_guard lock(release_lifecycle_mutex);
++    if (retired_handle_reused(handle, "ReleaseFeature")) return 1U;
++    if (native_release_views.erase(handle)) callback(feature_released, reinterpret_cast<std::uintptr_t>(handle));
++    return invoke();
++}
++
+ template<std::size_t Slot> struct D3D11RuntimeHooks {
+     static NgxResult init(unsigned long long app, const wchar_t* path, ID3D11Device* device,
+         const void* info, std::uint32_t sdk) {
+@@ -4541,8 +4622,10 @@ template<std::size_t Slot> struct D3D11RuntimeHooks {
+             const auto original = runtime.evaluate.load(std::memory_order_acquire);
+             return original ? original(context, handle, parameters, callback) : 0xBAD00007U;
+         }
+-        return evaluate_with_eye_calibration(context, handle, parameters,
+-            [&] { return evaluate_d3d11_impl(runtime, context, handle, parameters, callback); });
++        return evaluate_release_lifecycle(handle, [&] {
++            return evaluate_with_eye_calibration(context, handle, parameters,
++                [&] { return evaluate_d3d11_impl(runtime, context, handle, parameters, callback); });
++        });
+     }
+     static NgxResult evaluate_c(ID3D11DeviceContext* context, const NgxHandle* handle,
+         const NgxParameters* parameters, NgxProgressCallbackC callback) {
+@@ -4553,11 +4636,15 @@ template<std::size_t Slot> struct D3D11RuntimeHooks {
+             const auto original = runtime.evaluate_c.load(std::memory_order_acquire);
+             return original ? original(context, handle, parameters, callback) : 0xBAD00007U;
+         }
+-        return evaluate_with_eye_calibration(context, handle, parameters,
+-            [&] { return evaluate_d3d11_c_impl(runtime, context, handle, parameters, callback); });
++        return evaluate_release_lifecycle(handle, [&] {
++            return evaluate_with_eye_calibration(context, handle, parameters,
++                [&] { return evaluate_d3d11_c_impl(runtime, context, handle, parameters, callback); });
++        });
+     }
+     static NgxResult release(NgxHandle* handle) {
+-        return runtime_release_d3d11(d3d11_runtimes[Slot], handle);
++        return game_release_lifecycle(handle, [&] {
++            return release_d3d11_game_feature(handle, d3d11_runtimes[Slot].release.load(std::memory_order_acquire));
++        });
+     }
+ };
+ NgxResult hook_init_d3d11(unsigned long long app, const wchar_t* path, ID3D11Device* device,
+@@ -4581,17 +4668,9 @@ NgxResult hook_release_d3d11(NgxHandle* handle) {
+ }
+ 
+ NgxResult hook_core_release_d3d11(NgxHandle* const handle) {
+-    fg_forget_feature(handle);
+-    const auto original = real_core_release_d3d11.load(std::memory_order_acquire);
+-    release_d3d11_transport_view(handle);
+-    release_d3d11_peripheral_dlaa_view(handle);
+-    unregister_d3d11_game_feature(handle);
+-    const auto view_id = static_cast<DlssViewId>(
+-        reinterpret_cast<std::uintptr_t>(handle)
+-    );
+-    unregister_stereo_view(view_id);
+-    forget_gaze_view(view_id);
+-    return original == nullptr ? 0xBAD00007U : original(handle);
++    return game_release_lifecycle(handle, [&] {
++        return release_d3d11_game_feature(handle, real_core_release_d3d11.load(std::memory_order_acquire));
++    });
+ }
+ 
+ NgxResult runtime_create_d3d12(
+@@ -6824,6 +6903,23 @@ void restore_patched_slots() noexcept {
+ 
+ }  // namespace
+ 
++extern "C" __declspec(dllexport) std::uint32_t Cheeky_RegisterReleaseLifecycleV1(ReleaseLifecycleCallback callback) {
++    std::lock_guard lock(release_lifecycle_mutex);
++    const auto registered = release_lifecycle_callback.load(std::memory_order_relaxed);
++    if (!callback || (registered && registered != callback)) return 0;
++    release_lifecycle_callback.store(callback, std::memory_order_release);
++    return 1;
++}
++
++extern "C" __declspec(dllexport) std::uint32_t Cheeky_RequestReleaseV1(std::uint64_t handle) {
++    std::lock_guard lock(release_lifecycle_mutex);
++    const auto* native = reinterpret_cast<const NgxHandle*>(static_cast<std::uintptr_t>(handle));
++    const auto view = native_release_views.find(native);
++    if (view == native_release_views.end() || view->second.released || !view->second.release) return 0;
++    release_requests.push_back(native);
++    return 1;
++}
++
+ HMODULE find_loaded_ngx_core_runtime() noexcept { return find_core_runtime(); }
+ 
+ void note_d3d12_command_list_submission(
+diff --git a/src/quad_nr_transition.hpp b/src/quad_nr_transition.hpp
+new file mode 100644
+index 0000000..3fc4330
+--- /dev/null
++++ b/src/quad_nr_transition.hpp
+@@ -0,0 +1,52 @@
++#pragma once
++
++#include <cstdint>
++
++namespace cheeky::foveated_dlss {
++
++enum class QuadNrQuality { configured, half, bypass };
++
++struct QuadNrSelection {
++    float active_scale{};
++    float result_weight{1.0F};
++    bool bypass{};
++};
++
++class QuadNrTransition {
++public:
++    QuadNrSelection update(std::uint64_t session, std::int64_t frame,
++                           QuadNrQuality requested, float configured_scale) noexcept {
++        if (session != session_) {
++            session_ = session;
++            frame_ = 0;
++            active_ = QuadNrQuality::configured;
++            weight_ = steps;
++        }
++        // Both center views use the decision already made for this application frame.
++        if (frame != 0 && frame != frame_) {
++            frame_ = frame;
++            const auto target = requested == QuadNrQuality::half && configured_scale <= 0.5F
++                ? QuadNrQuality::bypass : requested;
++            if (active_ != target) {
++                weight_ -= weight_ >= fade_out_step ? fade_out_step : weight_;
++                if (weight_ == 0) active_ = target;
++            } else if (active_ != QuadNrQuality::bypass && weight_ < steps) {
++                ++weight_;
++            }
++        }
++        return {active_ == QuadNrQuality::half ? 0.5F : 0.0F,
++                static_cast<float>(weight_) / steps, active_ == QuadNrQuality::bypass};
++    }
++
++    QuadNrQuality active() const noexcept { return active_; }
++
++private:
++    static constexpr unsigned steps = 8;
++    static constexpr unsigned fade_out_step = 2;
++    std::uint64_t session_{};
++    std::int64_t frame_{};
++    QuadNrQuality active_{QuadNrQuality::configured};
++    unsigned weight_{steps};
++};
++
++} // namespace cheeky::foveated_dlss
+diff --git a/src/quad_quality_control.hpp b/src/quad_quality_control.hpp
+new file mode 100644
+index 0000000..e5a4a48
+--- /dev/null
++++ b/src/quad_quality_control.hpp
+@@ -0,0 +1,125 @@
++#pragma once
++
++#include "quad_nr_transition.hpp"
++#include "../shared/cheeky_quad_views.h"
++
++namespace cheeky::foveated_dlss {
++
++struct QuadQualityTargets {
++    bool prepare_sr{}, low_sr{};
++    QuadNrQuality nr{QuadNrQuality::configured};
++};
++
++class QuadQualityControl {
++public:
++    QuadQualityTargets update(std::uint64_t now, const CheekyQuadQualitySampleV1& sample,
++                              unsigned sr_trigger, unsigned nr_trigger, bool nr_half_available,
++                              bool sr_ready) noexcept {
++        sr_.set_trigger(sr_trigger);
++        nr_.set_trigger(nr_trigger);
++        if (!sr_trigger) {
++            targets_.prepare_sr = targets_.low_sr = false;
++            release_after_ = 0;
++            sr_observe_after_ = 0;
++        }
++        if (!nr_trigger) targets_.nr = QuadNrQuality::configured;
++        if (targets_.nr == QuadNrQuality::half && !nr_half_available)
++            targets_.nr = QuadNrQuality::configured;
++
++        if (!sample.recorded_ms || now - sample.recorded_ms > 500) {
++            sr_.reset();
++            nr_.reset();
++            release_after_ = 0;
++            return targets_;
++        }
++        if (sample.recorded_ms == last_sample_) return targets_;
++        if (sample.recorded_ms - last_sample_ > 500) {
++            sr_.reset();
++            nr_.reset();
++            release_after_ = 0;
++        }
++        last_sample_ = sample.recorded_ms;
++
++        const auto sr = sr_.observe(sample);
++        const auto nr = nr_.observe(sample);
++        // Even a short return to pressure interrupts a pending resource release.
++        if (!sr.headroom || targets_.low_sr) release_after_ = 0;
++        else if (targets_.prepare_sr && sr.recover) {
++            if (!release_after_) release_after_ = now + sr_retention_ms;
++            if (now >= release_after_) targets_.prepare_sr = false;
++        }
++        if (now >= sr_observe_after_) {
++            if (sr.prepare) targets_.prepare_sr = true;
++            if (sr.reduce && !targets_.low_sr && sr_ready) {
++                targets_.low_sr = true;
++                sr_observe_after_ = now + 1000;
++                sr_.reset();
++            } else if (sr.recover && targets_.low_sr) {
++                targets_.low_sr = false;
++                sr_observe_after_ = now + 1000;
++                sr_.reset();
++                release_after_ = now + sr_retention_ms;
++            }
++        }
++        if (now >= nr_observe_after_) {
++            // Choose from the tier actually in use. A pending fade-out can
++            // reverse direction without consuming another tier.
++            if (nr.reduce) {
++                targets_.nr = nr_half_available && active_nr_ == QuadNrQuality::configured
++                    ? QuadNrQuality::half : QuadNrQuality::bypass;
++            } else if (nr.recover) {
++                targets_.nr = nr_half_available && active_nr_ == QuadNrQuality::bypass
++                    ? QuadNrQuality::half : QuadNrQuality::configured;
++            }
++        }
++        return targets_;
++    }
++
++    void nr_switched(std::uint64_t now, QuadNrQuality active) noexcept {
++        active_nr_ = active;
++        nr_observe_after_ = now + 1000;
++        nr_.reset();
++    }
++
++    const QuadQualityTargets& targets() const noexcept { return targets_; }
++
++private:
++    static constexpr std::uint64_t sr_retention_ms = 8000;
++    struct Band {
++        bool prepare{}, reduce{}, recover{}, headroom{};
++    };
++
++    struct Threshold {
++        unsigned trigger{};
++        std::uint64_t prepare_since{}, reduce_since{}, recover_since{};
++
++        void reset() noexcept { prepare_since = reduce_since = recover_since = 0; }
++        void set_trigger(unsigned value) noexcept {
++            if (trigger != value) reset();
++            trigger = value;
++        }
++        Band observe(const CheekyQuadQualitySampleV1& sample) noexcept {
++            if (!trigger) return {};
++            const bool pressure = sample.gpu_load >= 0.90;
++            const double upper = trigger + 5.0;
++            const bool headroom = sample.gpu_load <= 0.85 && sample.output_percent > upper;
++            const auto tick = sample.recorded_ms;
++            return {sustained(pressure && sample.output_percent <= upper, tick, 500, prepare_since),
++                    sustained(pressure && sample.output_percent < trigger, tick, 500, reduce_since),
++                    sustained(headroom, tick, 3000, recover_since), headroom};
++        }
++        static bool sustained(bool condition, std::uint64_t tick, std::uint64_t time,
++                              std::uint64_t& since) noexcept {
++            if (!condition) since = 0;
++            else if (!since) since = tick;
++            return since && tick - since >= time;
++        }
++    };
++
++    Threshold sr_, nr_;
++    QuadQualityTargets targets_;
++    QuadNrQuality active_nr_{QuadNrQuality::configured};
++    std::uint64_t last_sample_{}, sr_observe_after_{}, nr_observe_after_{}, release_after_{};
++};
++
++} // namespace cheeky::foveated_dlss
+diff --git a/src/settings.cpp b/src/settings.cpp
+index 31dca2c..a44d7f7 100644
+--- a/src/settings.cpp
++++ b/src/settings.cpp
+@@ -1,10 +1,12 @@
+ #include "settings.hpp"
++#include "quad_quality_control.hpp"
+ #include "quad_view_bridge.hpp"
+ #include "reflex_override_state.hpp"
+ #include "../shared/fg_dlssg_preset.hpp"
+ 
+ #include <algorithm>
+ #include <atomic>
++#include <chrono>
+ #include <cstring>
+ #include <cmath>
+ #include <deque>
+@@ -16,6 +18,25 @@ namespace {
+ 
+ std::mutex settings_mutex;
+ Settings::FrameGeneration fg_settings;
++std::atomic<bool> quad_automatic_sr{};
++std::atomic<unsigned> quad_quality_target_percent{80};
++std::atomic<bool> quad_automatic_nr{};
++std::atomic<unsigned> quad_nr_target_percent{80};
++std::mutex quad_quality_mutex;
++QuadNrTransition quad_nr_transition;
++QuadQualityControl quad_quality_control;
++QuadNrSelection quad_nr_selection;
++struct QuadSrState {
++    std::uint64_t session{};
++    std::uint64_t mapping_revision{};
++    std::int64_t frame{};
++    float scale{};
++    unsigned prepared_eyes{};
++    bool prepare{}, baseline{};
++    unsigned applied_eyes{};
++    float applied_scales[2]{};
++    float active_scale{};
++} quad_sr_state;
+ std::atomic<bool> processing_allowed{true};
+ // Missing game DLSS inputs (see set_game_input_fallback); never persisted.
+ std::atomic<bool> game_fg_fallback{false}, game_nr_fallback{false};
+@@ -24,6 +45,9 @@ std::atomic<bool> enabled{true};
+ std::atomic<bool> d3d12_lower_hook{true};
+ std::atomic<bool> d3d11_use_d3d12_transport{false};
+ std::atomic<bool> d3d12_quad_compose_wait{true};
++std::atomic<bool> quad_precompose{true};
++QuadFocusSettings quad_focus;
++std::atomic<std::uint64_t> quad_focus_reference{};
+ std::atomic<bool> peripheral_dlaa_enabled{true};
+ std::atomic<std::uint32_t> peripheral_dlaa_scale_bits{0x3F400000U};
+ std::atomic<std::uint32_t> center_preset{};
+@@ -90,7 +114,7 @@ std::atomic<std::uint32_t> gaze_hold_ms_bits{0x43C80000U};
+ std::atomic<std::uint32_t> gaze_quantization_pixels{8U};
+ std::atomic<std::uint32_t> gaze_jump_reset_ratio_bits{0x3E000000U};
+ std::atomic<bool> nr_enabled{false};
+-std::atomic<NrProcessingOrder> nr_order{NrProcessingOrder::after_upscaling};
++std::atomic<NrProcessingOrder> nr_order{Settings{}.nr_processing_order};
+ std::atomic<bool> nr_foveated{true};
+ std::atomic<bool> nr_use_sr_foveation{false};
+ std::atomic<bool> nr_alignment_border_enabled{false};
+@@ -190,6 +214,9 @@ void store_float(std::atomic<std::uint32_t>& destination, float value) noexcept
+ 
+ }  // namespace
+ 
++void recenter_quad_focus() noexcept { ++quad_focus_reference; }
++std::uint64_t quad_focus_reference_revision() noexcept { return quad_focus_reference.load(); }
++
+ Settings configured_settings() noexcept {
+     std::lock_guard lock(settings_mutex);
+     Settings settings{};
+@@ -202,10 +229,16 @@ Settings configured_settings() noexcept {
+     settings.d3d11_use_d3d12_transport =
+         d3d11_use_d3d12_transport.load(std::memory_order_acquire);
+     settings.d3d12_quad_compose_wait = d3d12_quad_compose_wait.load(std::memory_order_acquire);
++    settings.quad_precompose = quad_precompose.load(std::memory_order_acquire);
++    settings.quad_focus = quad_focus;
+     settings.peripheral_dlaa_enabled =
+         peripheral_dlaa_enabled.load(std::memory_order_acquire);
+     settings.peripheral_dlaa_scale = load_float(peripheral_dlaa_scale_bits);
+     settings.center_supersampling = load_float(center_supersampling_bits);
++    settings.quad_automatic_sr = quad_automatic_sr.load(std::memory_order_acquire);
++    settings.quad_quality_target_percent = quad_quality_target_percent.load(std::memory_order_relaxed);
++    settings.quad_automatic_nr = quad_automatic_nr.load(std::memory_order_relaxed);
++    settings.quad_nr_target_percent = quad_nr_target_percent.load(std::memory_order_relaxed);
+     settings.afw_manual_coverage = afw_manual_coverage.load(std::memory_order_acquire);
+     settings.afw_automatic_coverage = afw_automatic_coverage.load(std::memory_order_acquire);
+     settings.afw_warp_margin = load_float(afw_warp_margin_bits);
+@@ -356,6 +389,18 @@ void update_settings(const Settings& settings) noexcept {
+         std::memory_order_release
+     );
+     d3d12_quad_compose_wait.store(settings.d3d12_quad_compose_wait, std::memory_order_release);
++    quad_precompose.store(settings.quad_precompose, std::memory_order_release);
++    quad_focus = settings.quad_focus;
++    quad_focus.width = std::clamp(quad_focus.width, 25u, 100u);
++    quad_focus.height = std::clamp(quad_focus.height, 25u, 100u);
++    quad_focus.radius = std::min(quad_focus.radius, 50u);
++    quad_focus.feather = std::min(quad_focus.feather, 50u);
++    quad_focus.stereo_distance_m = std::clamp(quad_focus.stereo_distance_m,quad_focus_min_distance_m,quad_focus_max_distance_m);
++    for (auto* axis : {&quad_focus.horizontal, &quad_focus.vertical}) {
++        axis->bias = std::clamp(axis->bias, -quad_focus_max_bias_deg, quad_focus_max_bias_deg);
++        axis->angle_gain = std::clamp(axis->angle_gain, -1.f, 1.f);
++        axis->deadzone = std::clamp(axis->deadzone, 0.f, 10.f);
++    }
+     peripheral_dlaa_enabled.store(
+         settings.peripheral_dlaa_enabled,
+         std::memory_order_release
+@@ -369,6 +414,10 @@ void update_settings(const Settings& settings) noexcept {
+     };
+     store_float(center_supersampling_bits, std::isfinite(settings.center_supersampling)
+         ? std::clamp(settings.center_supersampling, 1.0F, 2.0F) : 1.0F);
++    quad_quality_target_percent.store(std::clamp(settings.quad_quality_target_percent, 50U, 90U), std::memory_order_relaxed);
++    quad_automatic_sr.store(settings.quad_automatic_sr, std::memory_order_release);
++    quad_nr_target_percent.store(std::clamp(settings.quad_nr_target_percent, 50U, 90U), std::memory_order_relaxed);
++    quad_automatic_nr.store(settings.quad_automatic_nr, std::memory_order_release);
+     afw_manual_coverage.store(settings.afw_manual_coverage, std::memory_order_release);
+     afw_automatic_coverage.store(settings.afw_automatic_coverage, std::memory_order_release);
+     store_float(afw_warp_margin_bits, std::isfinite(settings.afw_warp_margin)
+@@ -749,6 +798,43 @@ void note_stereo_view_geometry(
+     }
+ }
+ 
++float quad_sr_active_scale() noexcept {
++    const auto quad = quad_view_snapshot();
++    std::lock_guard lock(quad_quality_mutex);
++    if (!quad.active || !quad_sr_state.frame || quad_sr_state.session != quad.session_generation ||
++        quad_sr_state.mapping_revision != quad.revision) return 0.0F;
++    return quad_sr_state.active_scale;
++}
++
++bool quad_automatic_quality_enabled() noexcept {
++    const bool sr = quad_automatic_sr.load(std::memory_order_acquire) && enabled.load(std::memory_order_acquire) &&
++        load_float(center_supersampling_bits)>1.0F;
++    const bool nr = quad_automatic_nr.load(std::memory_order_acquire) && nr_enabled.load(std::memory_order_acquire) &&
++        nr_order.load(std::memory_order_acquire)==NrProcessingOrder::before_upscaling;
++    return (sr || nr) && d3d11_use_d3d12_transport.load(std::memory_order_acquire);
++}
++
++void report_quad_sr_prepared(const Settings::QuadSrSelection& selection, float scale, bool ready) noexcept {
++    std::lock_guard lock(quad_quality_mutex);
++    if (quad_sr_state.session == selection.session && quad_sr_state.mapping_revision == selection.mapping_revision &&
++        quad_sr_state.frame == selection.frame && quad_sr_state.scale == scale) {
++        const auto bit = 1U << selection.eye;
++        if (ready) quad_sr_state.prepared_eyes |= bit;
++        else quad_sr_state.prepared_eyes &= ~bit;
++    }
++}
++
++void report_quad_sr_applied(const Settings::QuadSrSelection& selection, float scale) noexcept {
++    std::lock_guard lock(quad_quality_mutex);
++    auto& sr = quad_sr_state;
++    if (sr.session != selection.session || sr.mapping_revision != selection.mapping_revision ||
++        sr.frame != selection.frame) return;
++    sr.applied_scales[selection.eye] = scale;
++    sr.applied_eyes |= 1U << selection.eye;
++    if (sr.applied_eyes == 3U)
++        sr.active_scale = sr.applied_scales[0] == sr.applied_scales[1] ? sr.applied_scales[0] : 0.0F;
++}
++
+ Settings settings_for_view(
+     const Settings& settings,
+     const std::uint64_t view_id
+@@ -767,7 +853,59 @@ Settings settings_for_view(
+         // Quad FG is captured/presented by the layer, independently of SR transport.
+         result.fg.enabled=false;
+         if(!role){result.enabled=false;result.peripheral_dlaa_enabled=false;}
+-        else if(role->focus){result.peripheral_dlaa_enabled=false;}
++        else if(role->focus){
++            result.peripheral_dlaa_enabled=false;
++            const bool pre_sr_nr = result.nr_enabled &&
++                result.nr_processing_order == NrProcessingOrder::before_upscaling;
++            const bool auto_nr = pre_sr_nr && result.quad_automatic_nr;
++            const bool auto_sr = result.enabled && result.quad_automatic_sr && result.center_supersampling > 1.0F;
++            if(result.d3d11_use_d3d12_transport&&quad.graphics_api==11){
++                const auto frame=quad_app_frame();
++                if(!frame.session_generation||!frame.predicted_display_time) return result;
++                CheekyQuadQualitySampleV1 sample{};
++                const auto module=(auto_sr||auto_nr)?quad_view_module():nullptr;
++                const auto read_sample=module?reinterpret_cast<CheekyQuadGetQualitySampleV1Fn>(
++                    GetProcAddress(module,"CheekyQuad_GetQualitySampleV1")):nullptr;
++                if(read_sample) read_sample(frame.session_generation,&sample);
++                std::lock_guard lock(quad_quality_mutex);
++                auto& sr=quad_sr_state;
++                if(sr.session!=frame.session_generation||sr.mapping_revision!=quad.revision){
++                    sr={frame.session_generation,quad.revision};
++                    quad_quality_control={};
++                    quad_nr_transition={};
++                    quad_nr_selection={};
++                }
++                // Advance the controller and the blend only once for both center views.
++                if(sr.frame!=frame.predicted_display_time){
++                    sr.frame=frame.predicted_display_time;
++                    sr.applied_eyes=0;
++                    if(sr.scale!=result.center_supersampling){
++                        sr.scale=result.center_supersampling;
++                        sr.prepared_eyes=0;
++                    }
++                    const auto now=static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::milliseconds>(
++                        std::chrono::steady_clock::now().time_since_epoch()).count());
++                    const auto targets=quad_quality_control.update(now,sample,
++                        auto_sr?result.quad_quality_target_percent:0U,auto_nr?result.quad_nr_target_percent:0U,
++                        result.nr_working_scale>0.5F,sr.prepared_eyes==3U);
++                    sr.prepare=targets.prepare_sr;
++                    sr.baseline=targets.low_sr&&sr.prepared_eyes==3U;
++                    if(!sr.prepare)sr.prepared_eyes=0;
++                    const auto active_nr=quad_nr_transition.active();
++                    if(pre_sr_nr){
++                        quad_nr_selection=quad_nr_transition.update(frame.session_generation,frame.predicted_display_time,
++                            targets.nr,result.nr_working_scale);
++                    }else{
++                        quad_nr_transition={};
++                        quad_nr_selection={};
++                    }
++                    if(quad_nr_transition.active()!=active_nr)
++                        quad_quality_control.nr_switched(now,quad_nr_transition.active());
++                }
++                result.quad_nr_selection=quad_nr_selection;
++                result.quad_sr_selection={sr.session,sr.mapping_revision,role->eye_index,sr.prepare,sr.baseline,sr.frame};
++            }
++        }
+         else {result.enabled=settings.enabled&&settings.peripheral_dlaa_enabled;
+             result.center_preset=settings.peripheral_dlaa_preset;result.rr_center_preset=settings.rr_peripheral_preset;
+             result.center_supersampling=1.0F;result.d3d11_use_d3d12_transport=false;}
+diff --git a/src/settings.hpp b/src/settings.hpp
+index ec19daf..c801e6f 100644
+--- a/src/settings.hpp
++++ b/src/settings.hpp
+@@ -1,8 +1,10 @@
+ #pragma once
+ 
+ #include "foveation.hpp"
++#include "quad_nr_transition.hpp"
+ #include "eye_calibration_policy.hpp"
+ #include "../shared/cheeky_fg_shader11.hpp"
++#include "../shared/quad_focus.hpp"
+ 
+ #include <cstdint>
+ #include <array>
+@@ -82,7 +84,7 @@ struct Settings {
+         CheekyFgOpticalSettings optical;
+         float width{0.55F}, height{0.45F}, x{}, y{}, feather{0.04F}; // Same defaults as SR.
+         std::uint32_t queue_priority{2}; // 1 separate HIGH (optical flow only); 2 shared game queue. Legacy 0 maps to shared.
+-        std::uint32_t release_point{3}; // 0 FG submission, 1 preparation, 2 completion, 3 generated XR submission, 4 4ms post-submit, 5 never held, 6 first generated XR submission, 7 second generated XR submission, 8 color capture GPU completion.
++        std::uint32_t release_point{3}; // 0 submission, 1 preparation, 2 completion, 3 all generated XR, 4 submit + 4 ms, 5 capacity, 6/7 first/second generated XR, 8 color capture completion, 9 refresh-rate clock.
+         std::uint32_t pacing_clock{}; // Retained for old settings; current layers use demand-driven production.
+         std::uint32_t target_refresh_hz{}; // 0 automatic; manual headset refresh override, 30..360 Hz.
+         std::uint32_t latency_diagnostics{0}; // Sparse calibrated GPU/CPU timeline and its per-frame log; opt-in.
+@@ -98,6 +100,8 @@ struct Settings {
+     bool d3d12_lower_hook{true}; // Applied at interception startup; changes require a restart.
+     bool d3d11_use_d3d12_transport{false};
+     bool d3d12_quad_compose_wait{true}; // D3D12 quad views: xrEndFrame waits for the composition GPU work.
++    bool quad_precompose{true}; // Quad FG consumes complete composed eyes; latched by the OpenXR session.
++    QuadFocusSettings quad_focus;
+     bool peripheral_dlaa_enabled{true};
+     float peripheral_dlaa_scale{0.75F};
+     std::uint32_t center_preset{};
+@@ -105,6 +109,17 @@ struct Settings {
+     std::uint32_t rr_center_preset{};
+     std::uint32_t rr_peripheral_preset{};
+     float center_supersampling{1.0F};
++    bool quad_automatic_sr{};
++    unsigned quad_quality_target_percent{80};
++    bool quad_automatic_nr{};
++    unsigned quad_nr_target_percent{80};
++    struct QuadSrSelection {
++        std::uint64_t session{};
++        std::uint64_t mapping_revision{};
++        unsigned eye{};
++        bool prepare{}, baseline{};
++        std::int64_t frame{};
++    } quad_sr_selection;
+     // AFW needs donors for both eye regions even when the source eye is known.
+     // Coverage is opt-in. With both modes off, use calibrated per-eye settings.
+     bool afw_manual_coverage{false};
+@@ -158,7 +173,7 @@ struct Settings {
+     float gaze_jump_reset_ratio{0.125F};
+ 
+     bool nr_enabled{false};
+-    NrProcessingOrder nr_processing_order{NrProcessingOrder::after_upscaling};
++    NrProcessingOrder nr_processing_order{NrProcessingOrder::before_upscaling};
+     bool nr_foveated{true};
+     bool nr_use_sr_foveation{false};
+     bool nr_alignment_border_enabled{false};
+@@ -169,6 +184,7 @@ struct Settings {
+     float nr_roundness{0.0F};
+     float nr_transition_width{0.08F};
+     float nr_working_scale{1.0F};
++    QuadNrSelection quad_nr_selection{}; // Frame-local, used by the D3D11 Pre-SR transport.
+     std::uint32_t nr_preset{};
+     std::uint32_t nr_style{};
+     float nr_intensity{1.0F};
+@@ -315,11 +331,17 @@ void clear_stereo_calibration() noexcept;
+ // Settings for the game's DLSS passes. With Universal DLSS 5 selected, NR
+ // reads as disabled here; the OpenXR layer evaluates it instead.
+ [[nodiscard]] Settings current_settings() noexcept;
++float quad_sr_active_scale() noexcept;
++bool quad_automatic_quality_enabled() noexcept;
++void report_quad_sr_prepared(const Settings::QuadSrSelection& selection, float scale, bool ready) noexcept;
++void report_quad_sr_applied(const Settings::QuadSrSelection& selection, float scale) noexcept;
+ // Like current_settings(), without hiding Universal DLSS 5's NR.
+ [[nodiscard]] Settings universal_nr_settings() noexcept;
+ [[nodiscard]] bool universal_nr_requested() noexcept;
+ [[nodiscard]] Settings configured_settings() noexcept;
+ void update_settings(const Settings& settings) noexcept;
++void recenter_quad_focus() noexcept;
++std::uint64_t quad_focus_reference_revision() noexcept;
+ // A host can stop processing on detach without taking locks under DllMain.
+ // User preferences remain intact; snapshots consumed by rendering are gated.
+ void set_processing_allowed(bool allowed) noexcept;
+diff --git a/standalone/overlay.cpp b/standalone/overlay.cpp
+index a5434b4..0fcc532 100644
+--- a/standalone/overlay.cpp
++++ b/standalone/overlay.cpp
+@@ -713,6 +713,7 @@ void overlay_present(IDXGISwapChain* swapchain, ID3D12CommandQueue* queue, const
+         if (r.dx12 && r.fence->GetCompletedValue() < r.frames[r.serial % r.frames.size()].fence_value) return;
+         r.input->enabled = true;
+         poll_overlay_hotkey(*r.input);
++        dispatch_focus_recenter(r,runtime,*r.input);
+         const bool menu_open = r.input->open.load();
+         global.cursor_open = menu_open; global.cursor_window = r.input->window;
+         global.cursor_controllers = r.input->headset_pointer.load();
+diff --git a/standalone/overlay_input.cpp b/standalone/overlay_input.cpp
+index 7e15747..c1648e6 100644
+--- a/standalone/overlay_input.cpp
++++ b/standalone/overlay_input.cpp
+@@ -43,6 +43,13 @@ SHORT physical_key_state(int key) {
+ #endif
+     return original_async_key_state(key);
+ }
++unsigned focus_chord(unsigned key) {
++    // DCS distinguishes left and right modifiers. Store their physical keys.
++    unsigned chord=key;
++    for(unsigned i=0;i<focus_modifier_keys.size();++i)
++        if(physical_key_state(focus_modifier_keys[i])&0x8000)chord|=1u<<(8+i);
++    return chord;
++}
+ SHORT WINAPI captured_async_key_state(int key) {
+     const auto result = physical_key_state(key);
+     for (const auto mouse_key : mouse_keys) if (key == mouse_key) {
+@@ -275,7 +282,19 @@ void set_overlay_framebuffer_scale(unsigned width, unsigned height) {
+ }
+ 
+ void poll_overlay_hotkey(InputState& input) {
+-    if (input.rebinding) return;
++    if (const auto shortcut=input.focus_shortcut.load()) {
++        const unsigned key=shortcut&0xff;
++#ifdef CHEEKY_OVERLAY_TEST_DESKTOP
++        const bool down=cheeky_overlay_test_key_down(key);
++#else
++        const bool down=(physical_key_state(key)&0x8000)!=0;
++#endif
++        const bool was_down=input.focus_key_down.exchange(down);
++        if (down&&!was_down&&input.enabled&&!input.open&&foreground(input.window)&&focus_chord(key)==shortcut)
++            input.focus_recenter_requested=true;
++    }
++    if (!input.open) input.shortcut_target=ShortcutTarget::none;
++    if (input.shortcut_target!=ShortcutTarget::none) return;
+     const auto key = input.menu_key.load();
+ #ifdef CHEEKY_OVERLAY_TEST_DESKTOP
+     const bool down = cheeky_overlay_test_key_down(key);
+@@ -292,15 +311,13 @@ void poll_overlay_hotkey(InputState& input) {
+     }
+ }
+ 
+-void begin_menu_key_rebind(InputState& input) {
+-    input.rebound_key = 0;
+-    input.rebinding = true;
++void begin_shortcut_recording(InputState& input,ShortcutTarget target) {
++    input.recorded_shortcut=RecordedShortcut{};
++    input.shortcut_target=target;
+ }
+ 
+-unsigned consume_menu_key_rebind(InputState& input) { return input.rebound_key.exchange(0); }
+-
+ bool save_menu_key(InputState& input, unsigned key) {
+-    if (!valid_menu_key(key) || input.config_path.empty()) return false;
++    if (!valid_menu_key(key) || key==(input.focus_shortcut.load()&0xff) || input.config_path.empty()) return false;
+     const auto value = std::to_wstring(key);
+     if (!WritePrivateProfileStringW(L"Overlay", L"MenuKey", value.c_str(), input.config_path.c_str())) return false;
+     // A held binding must finish its current press before it can toggle.
+@@ -309,6 +326,16 @@ bool save_menu_key(InputState& input, unsigned key) {
+     return true;
+ }
+ 
++bool save_focus_shortcut(InputState& input,unsigned shortcut) {
++    const auto key=shortcut&0xff;
++    if ((shortcut&&(!valid_menu_key(key)||key==input.menu_key.load()))||input.config_path.empty()) return false;
++    const auto value=std::to_wstring(shortcut);
++    if (!WritePrivateProfileStringW(L"Overlay",L"FocusRecenterShortcut",value.c_str(),input.config_path.c_str())) return false;
++    input.focus_key_down=key&&(physical_key_state(key)&0x8000)!=0;
++    input.focus_shortcut=shortcut;
++    return true;
++}
++
+ bool save_headset_pointer(InputState& input, bool enabled) {
+     if (input.config_path.empty() || !WritePrivateProfileStringW(L"Overlay", L"HeadsetPointer",
+             enabled ? L"1" : L"0", input.config_path.c_str())) return false;
+@@ -331,7 +358,9 @@ LRESULT CALLBACK overlay_wndproc(HWND window, UINT message, WPARAM wparam, LPARA
+     }
+     if (message == WM_KILLFOCUS || (message == WM_ACTIVATEAPP && !wparam)) {
+         // Losing desktop focus releases input ownership, not menu visibility.
+-        input->menu_key_down = false; input->rebinding = false;
++        input->menu_key_down = false;
++        input->shortcut_target=ShortcutTarget::none;
++        input->focus_recenter_requested=false;
+         input->pointer_buttons = 0; restore_cursor(*input, false);
+         if (message == WM_ACTIVATEAPP) {
+             std::lock_guard lock(input->mutex);
+@@ -342,14 +371,15 @@ LRESULT CALLBACK overlay_wndproc(HWND window, UINT message, WPARAM wparam, LPARA
+     const bool key_message = message == WM_KEYDOWN || message == WM_KEYUP ||
+         message == WM_SYSKEYDOWN || message == WM_SYSKEYUP;
+     const bool key_down = message == WM_KEYDOWN || message == WM_SYSKEYDOWN;
+-    if (input->enabled && focused && input->rebinding && key_message) {
+-        if (key_down && !(lparam & (LPARAM{1} << 30))) {
+-            const auto key = static_cast<unsigned>(wparam);
+-            if (key == VK_ESCAPE || valid_menu_key(key)) {
+-                input->menu_key_down = true;
+-                input->rebound_key = key;
+-                input->rebinding = false;
+-            }
++    const auto target=input->shortcut_target.load();
++    if (input->enabled&&input->open&&focused&&target!=ShortcutTarget::none&&key_message) {
++        const auto key=static_cast<unsigned>(wparam);
++        if (key_down&&!(lparam&(LPARAM{1}<<30))&&(key==VK_ESCAPE||valid_menu_key(key))) {
++            // The polling path must ignore the same press consumed by recording.
++            if (key==input->menu_key) input->menu_key_down=true;
++            const unsigned binding=target==ShortcutTarget::focus&&key!=VK_ESCAPE?focus_chord(key):key;
++            input->recorded_shortcut=RecordedShortcut{target,binding};
++            input->shortcut_target=ShortcutTarget::none;
+         }
+         return 0;
+     }
+@@ -365,6 +395,14 @@ LRESULT CALLBACK overlay_wndproc(HWND window, UINT message, WPARAM wparam, LPARA
+         return 0;
+     }
+     const bool capture = input->enabled && input->open && focused;
++    const auto focus_shortcut=input->focus_shortcut.load();
++    if (key_message&&focus_shortcut&&wparam==(focus_shortcut&0xff)) {
++        if (key_down) {
++            if (!(lparam&(LPARAM{1}<<30))&&!input->focus_key_down.exchange(true)&&
++                input->enabled&&focused&&!input->open&&focus_chord(static_cast<unsigned>(wparam))==focus_shortcut)
++                input->focus_recenter_requested=true;
++        } else input->focus_key_down=false;
++    }
+     if (capture && pointer_message(message)) {
+         queue_pointer(*input, message, wparam, lparam);
+         return 0; // Do not let the game act on the menu's pointer click.
+@@ -423,6 +461,8 @@ InputState* attach_input(HWND window) {
+     if (!input->config_path.empty()) {
+         const auto saved = GetPrivateProfileIntW(L"Overlay", L"MenuKey", VK_F8, input->config_path.c_str());
+         if (valid_menu_key(saved)) input->menu_key = saved;
++        const auto shortcut=GetPrivateProfileIntW(L"Overlay",L"FocusRecenterShortcut",0,input->config_path.c_str());
++        if (valid_menu_key(shortcut&0xff)&&(shortcut&0xff)!=input->menu_key.load()) input->focus_shortcut=shortcut;
+         input->headset_pointer = GetPrivateProfileIntW(L"Overlay", L"HeadsetPointer", 1, input->config_path.c_str()) != 0;
+     }
+     input->previous = reinterpret_cast<WNDPROC>(GetWindowLongPtrW(window, GWLP_WNDPROC));
+diff --git a/standalone/overlay_input.hpp b/standalone/overlay_input.hpp
+index 229a69e..f5ac538 100644
+--- a/standalone/overlay_input.hpp
++++ b/standalone/overlay_input.hpp
+@@ -7,6 +7,11 @@
+ #include <vector>
+ namespace cheeky::standalone {
+ struct InputMessage { UINT message; WPARAM wparam; LPARAM lparam; };
++enum class ShortcutTarget { none, menu, focus };
++struct RecordedShortcut {
++    ShortcutTarget target{};
++    unsigned key{};
++};
+ struct InputState {
+     HWND window{};
+     WNDPROC previous{};
+@@ -14,8 +19,11 @@ struct InputState {
+     std::vector<InputMessage> messages;
+     std::atomic<bool> open{}, enabled{};
+     std::atomic<unsigned> menu_key{VK_F8};
+-    std::atomic<bool> menu_key_down{}, rebinding{};
+-    std::atomic<unsigned> rebound_key{};
++    std::atomic<bool> menu_key_down{};
++    std::atomic<ShortcutTarget> shortcut_target{};
++    std::atomic<RecordedShortcut> recorded_shortcut{};
++    std::atomic<unsigned> focus_shortcut{};
++    std::atomic<bool> focus_key_down{}, focus_recenter_requested{};
+     // Off: only the desktop mouse/keyboard drive the menu; VR controllers and hands are ignored.
+     std::atomic<bool> headset_pointer{true};
+     std::wstring config_path;
+@@ -38,8 +46,10 @@ void release_cursor(InputState&);
+ void restore_cursor(InputState&,bool);
+ InputState* attach_input(HWND);
+ void poll_overlay_hotkey(InputState&);
+-void begin_menu_key_rebind(InputState&);
+-unsigned consume_menu_key_rebind(InputState&);
++void begin_shortcut_recording(InputState&,ShortcutTarget);
++inline constexpr std::array focus_modifier_keys{VK_LCONTROL,VK_RCONTROL,VK_LSHIFT,VK_RSHIFT,VK_LMENU,VK_RMENU};
++bool save_focus_shortcut(InputState&, unsigned);
++
+ bool save_menu_key(InputState&, unsigned);
+ bool save_headset_pointer(InputState&, bool);
+ void process_overlay_input(InputState&, unsigned controller_buttons = 0);
+diff --git a/standalone/overlay_ui.cpp b/standalone/overlay_ui.cpp
+index 4297b23..c2bab60 100644
+--- a/standalone/overlay_ui.cpp
++++ b/standalone/overlay_ui.cpp
+@@ -1,4 +1,5 @@
+ #include "overlay_ui.hpp"
++#include "runtime_host_api.hpp"
+ #include "settings_io.hpp"
+ #include "version.h"
+ #include "cheeky_gaze_abi.h"
+@@ -78,7 +79,8 @@ std::string plain(std::string_view value) {
+ void refresh(OverlayUiState& r, const OverlayRuntime& runtime, bool force = false) {
+     const auto now = GetTickCount64();
+     if (!runtime.snapshot || (!force && (now < r.next_snapshot || ImGui::IsAnyItemActive()))) return;
+-    std::array<char, 32768> buffer{};
++    auto& buffer = r.snapshot_buffer;
++    if (buffer.empty()) buffer.resize(cheeky_runtime_message_capacity);
+     if (!runtime.snapshot(buffer.data(), static_cast<std::uint32_t>(buffer.size()))) {
+         r.message = "Runtime snapshot unavailable"; return;
+     }
+@@ -1123,7 +1125,10 @@ void draw_fg(Settings& settings, std::string_view snapshot, bool dx11) {
+     const bool universal=nr_universal_active(effective_settings(settings,snapshot));
+     // Dependent controls follow the method that runs; see effective_settings.
+     const bool hidden=fg_game_hidden(snapshot);
+-    const auto runs=[hidden](unsigned method){return hidden?cheeky_fg_without_game(method):method;};
++    const bool hybrid_available=dx11&&!universal;
++    const auto runs=[hidden,hybrid_available](unsigned method){
++        return hidden||(cheeky_fg_hybrid(method)&&!hybrid_available)?cheeky_fg_without_game(method):method;
++    };
+     const auto native_shader11=[&]{return dx11&&!universal&&cheeky_fg_shader_only(runs(s.center_method),runs(s.peripheral_method),s.foveated||quad);};
+     const auto fg = member(snapshot, "fg");
+     ImGui::Checkbox("Enable Frame Generation", &s.enabled);
+@@ -1158,21 +1163,21 @@ void draw_fg(Settings& settings, std::string_view snapshot, bool dx11) {
+ 
+     ImGui::SeparatorText(quad?"Quad view quality":"Foveation");
+     // Type and method share one saved ID: 0 DLSS-G, 1-4 DLSS vectors,
+-    // 5-8 optical flow, 9-12 optical flow + depth, 13 previous frame.
++    // 5-8 optical flow, 9-12 optical flow + depth, 13 previous frame, 16-31 hybrid.
+     const bool game_dlss=game_dlss_seen(snapshot);
+-    const auto method_combo=[game_dlss,hidden,runs](const char* prefix,unsigned& saved,bool periphery,bool quad_view){
+-        constexpr const char* types[]{"DLSS-G","DLSS Vectors","Optiflow","Optiflow + Depth","Previous frame"};
++    const auto method_combo=[game_dlss,hidden,runs,hybrid_available](const char* prefix,unsigned& saved,bool periphery,bool quad_view){
++        constexpr const char* types[]{"DLSS-G","DLSS Vectors","Optiflow","Optiflow + Depth","Previous frame","Optiflow Hybrid"};
+         constexpr const char* methods[]{"Simple Warping","Bidirectional Interpolation",
+             "Confidence-Guided Interpolation","Confidence-Guided Interpolation (Fast)"};
+-        const auto type_of=[](unsigned m){return m==0?0:m==cheeky_fg_previous?4:int((m-1)/4)+1;};
++        const auto type_of=[](unsigned m){return m==0?0:m==cheeky_fg_previous?4:cheeky_fg_hybrid(m)?5:int((m-1)/4)+1;};
+         // DLSS-G, DLSS vectors and depth read the game's DLSS guides; see cheeky_fg_needs_game.
+-        const auto needs_game=[](int type){return type<2||type==3;};
+-        const int first=periphery&&quad_view?1:0,count=periphery?5:4;
++        const auto needs_game=[](int type){return type<2||type==3||type==5;};
++        const int first=periphery&&quad_view?1:0,count=periphery?5:6;
+         // A saved game-only method draws as the Optiflow it runs as and is
+         // written only when an edit changes it.
+         const unsigned shown_method=runs(saved);
+         unsigned method=shown_method;
+-        const int interpolation=cheeky_fg_shader(method)?int((method-1)%4):2;
++        const int interpolation=cheeky_fg_shader(method)?int(cheeky_fg_interpolation(method)):2;
+         char label[64]{};
+         sprintf_s(label,"%s type",prefix);
+         const int current=type_of(method);
+@@ -1181,6 +1186,8 @@ void draw_fg(Settings& settings, std::string_view snapshot, bool dx11) {
+         sprintf_s(shown,"%s%s",types[current],!hidden&&needs_game(current)&&!game_dlss?" (needs game DLSS)":"");
+         if(ImGui::BeginCombo(label,shown)){
+             for(int type=first;type<count;++type){
++                if(!periphery&&type==4)continue;
++                if(type==5&&!hybrid_available)continue;
+                 if(hidden&&needs_game(type))continue;
+                 const bool unavailable=needs_game(type)&&!game_dlss;
+                 char item[64]{};
+@@ -1191,12 +1198,19 @@ void draw_fg(Settings& settings, std::string_view snapshot, bool dx11) {
+         }
+         if(selected!=current){
+             const int type=selected;
+-            method=type==0?0u:type==4?cheeky_fg_previous:unsigned((type-1)*4+interpolation+1);
++            method=type==0?0u:type==4?cheeky_fg_previous:type==5?cheeky_fg_hybrid_base:unsigned((type-1)*4+interpolation+1);
+         }
+         test_control(label);
+         // Until the runtime's switch lands, say which saved type runs on optical flow.
+         if(hidden&&needs_game(type_of(saved)))ImGui::Text("Using Optiflow: %s needs game DLSS",types[type_of(saved)]);
+-        if(cheeky_fg_shader(method)){
++        if(cheeky_fg_hybrid(method)){
++            int reconstruction=int(cheeky_fg_interpolation(method));
++            ImGui::Combo("Optiflow Reconstruction",&reconstruction,methods,4);
++            bool guidance=cheeky_fg_hybrid_guidance(method),splat=cheeky_fg_hybrid_splat(method);
++            ImGui::Checkbox("Depth-guided reconstruction",&guidance);
++            ImGui::Checkbox("Depth splat",&splat);
++            method=cheeky_fg_hybrid_method(static_cast<CheekyFgInterpolation>(reconstruction),guidance,splat);
++        }else if(cheeky_fg_shader(method)){
+             sprintf_s(label,"%s method",prefix);
+             int index=int((method-1)%4);
+             if(ImGui::Combo(label,&index,methods,4))method=method-(method-1)%4+unsigned(index);
+@@ -1209,7 +1223,6 @@ void draw_fg(Settings& settings, std::string_view snapshot, bool dx11) {
+         int preset=int(s.dlssg_preset)-1;
+         if(ImGui::Combo("DLSS-G preset",&preset,"Preset A\0Preset B\0Preset C\0"))s.dlssg_preset=unsigned(preset+1);
+         test_control("FgDlssgPreset");
+-        if(s.dlssg_preset==2)ImGui::TextWrapped("Preset B needs separate scene and HUD inputs; without them it behaves like Preset A.");
+         if(s.dlssg_preset==3)ImGui::TextWrapped("Preset C uses the faster Lite model and requires DLSS-G 310.9.16 or newer.");
+     }
+     if(cheeky_fg_optical(runs(s.center_method))){
+@@ -1225,11 +1238,12 @@ void draw_fg(Settings& settings, std::string_view snapshot, bool dx11) {
+         ImGui::TextWrapped("Input frames: Universal DLSS 5 output (NR-enhanced).");
+         if(dx11)ImGui::TextWrapped("D3D11: Universal DLSS 5 uses the layer's DX12 bridge.");
+     }
+-    fg_percent(quad?"Center FG scale":"FG scale", s.resolution_percent);
+-    if(!quad){
++    const bool complete_eye=cheeky_fg_hybrid(s.center_method);
++    if(!complete_eye)fg_percent(quad?"Center FG scale":"FG scale",s.resolution_percent);
++    if(!quad&&!complete_eye){
+     ImGui::Checkbox("Foveated frame generation", &s.foveated);
+     }
+-    if (s.foveated||quad) {
++    if (!complete_eye&&(s.foveated||quad)) {
+         if(!quad){
+         ImGui::Checkbox("Match DLSS-SR foveation region", &s.match_sr_region);
+         if (s.match_sr_region) {
+@@ -1291,15 +1305,17 @@ void draw_fg(Settings& settings, std::string_view snapshot, bool dx11) {
+         // Display pipeline stages without renumbering persisted release IDs.
+         // CPU submission can precede GPU capture completion. Keep its timed
+         // variant adjacent; its deadline can overlap the GPU milestones.
+-        constexpr unsigned release_order[]{5,0,4,8,1,2,6,7,3};
+-        int release_choice=8;
++        constexpr unsigned release_order[]{5,9,0,4,8,1,2,6,7,3};
++        int release_choice=9;
+         for(int i=0;i<int(std::size(release_order));++i)if(release_order[i]==s.release_point)release_choice=i;
+         combo("Release game rendering", release_choice,
+-            "Never (buffer capacity only)\0After FG submission\0"
++            "Never (buffer capacity only)\0Refresh-rate clock\0After FG submission\0"
+             "4 ms after FG submission\0After color capture completes\0After GPU preparation\0After FG completion\0"
+             "After first generated frame submission\0After second generated frame submission\0After all generated frames submitted\0");
+         s.release_point=release_order[release_choice];
+-        if (s.release_point == 8)
++        if (s.release_point == 9)
++            ImGui::TextWrapped("Starts each render at the headset refresh period multiplied by the active FG multiplier.\nNote: Available buffers and resource fences also control rendering.");
++        else if (s.release_point == 8)
+             ImGui::TextWrapped(native_shader11()?"Native D3D11 orders capture on its immediate context; this mode uses buffer capacity only.":
+                 "The next render starts after the GPU completes both-eye color capture and buffer capacity is available. Optical flow, frame generation and presentation may still be in flight.");
+         else if (s.release_point == 5)
+@@ -1312,6 +1328,7 @@ void draw_fg(Settings& settings, std::string_view snapshot, bool dx11) {
+             ImGui::TextWrapped("Experimental overlap: capture order alone cannot prove frame identity. Use After all generated frames submitted for serialized matching.");
+         if(native_shader11()){
+             combo("FG output destination", s.direct_xr_output, "Private image + copy\0Direct OpenXR image (experimental)\0");
++        if(!quad||!settings.quad_precompose)
+             ImGui::Checkbox("Reuse whole-image eye captures (experimental)", &s.native11_skip_identity_crop);
+             ImGui::TextWrapped("Per-eye swapchains and quad views: use the captured eye directly instead of copying it again.");
+         }
+@@ -1492,6 +1509,15 @@ std::string menu_key_name(unsigned key) {
+     return "Key " + std::to_string(key);
+ }
+ 
++std::string focus_shortcut_name(unsigned shortcut) {
++    if (!shortcut) return "Unbound";
++    constexpr std::array labels{"Left Ctrl+","Right Ctrl+","Left Shift+","Right Shift+","Left Alt+","Right Alt+"};
++    std::string name;
++    for (unsigned i=0;i<labels.size();++i)
++        if (shortcut&(1u<<(8+i))) name+=labels[i];
++    return name+menu_key_name(shortcut&0xff);
++}
++
+ // Whole-system load (sampled once per second) and output FPS, shown above the tabs.
+ void draw_system_load(std::string_view snapshot) {
+     const auto load = member(snapshot, "system_load");
+@@ -1544,11 +1570,22 @@ void draw_donate_button(OverlayUiState& state) {
+         state.message = "Could not open the donation page in your browser.";
+ }
+ 
++void dispatch_focus_recenter(OverlayUiState& r,const OverlayRuntime& runtime,InputState& input) {
++    if (input.focus_recenter_requested.exchange(false)&&!input.open&&foreground(input.window))
++        command(r,runtime,"quad_focus_recenter");
++}
++
+ void draw_overlay_ui(OverlayUiState& r,const OverlayRuntime& runtime,InputState& input,const char* renderer,const char* status,bool& open) {
+     refresh(r, runtime);
+-    if (const auto rebound = consume_menu_key_rebind(input)) {
+-        if (rebound != VK_ESCAPE) {
+-            r.menu_key_error = save_menu_key(input, rebound) ? "" : "Could not save the menu key.";
++    const auto recorded=input.recorded_shortcut.exchange(RecordedShortcut{});
++    if (recorded.key!=VK_ESCAPE) {
++        if (recorded.target==ShortcutTarget::menu) {
++            r.menu_key_error=save_menu_key(input,recorded.key)?"":"Could not save the menu key.";
++        } else if (recorded.target==ShortcutTarget::focus) {
++            if ((recorded.key&0xff)==input.menu_key.load())
++                r.focus_shortcut_error="Choose a different key for the menu toggle or focus recenter.";
++            else
++                r.focus_shortcut_error=save_focus_shortcut(input,recorded.key)?"":"Could not save the recenter shortcut.";
+         }
+     }
+     const float menu_scale = ImGui::GetIO().FontGlobalScale;
+@@ -1585,11 +1622,11 @@ void draw_overlay_ui(OverlayUiState& r,const OverlayRuntime& runtime,InputState&
+             if (begin_tab("General")) {
+                 ImGui::SeparatorText("Menu");
+                 ImGui::Text("Toggle key: %s", key_name.c_str());
+-                if (input.rebinding) {
++                if (input.shortcut_target==ShortcutTarget::menu) {
+                     ImGui::TextUnformatted("Press one key. Escape cancels; modifier keys cannot be bound.");
+-                    if (ImGui::Button("Cancel key change")) input.rebinding = false;
++                    if (ImGui::Button("Cancel key change")) input.shortcut_target=ShortcutTarget::none;
+                 } else {
+-                    if (ImGui::Button("Change menu key")) begin_menu_key_rebind(input);
++                    if (ImGui::Button("Change menu key")) begin_shortcut_recording(input,ShortcutTarget::menu);
+                     ImGui::SameLine();
+                     if (ImGui::Button("Reset to F8"))
+                         r.menu_key_error = save_menu_key(input, VK_F8) ? "" : "Could not save the menu key.";
+@@ -1602,6 +1639,9 @@ void draw_overlay_ui(OverlayUiState& r,const OverlayRuntime& runtime,InputState&
+                     ImGui::SeparatorText("Compatibility");
+                     ImGui::Checkbox("DX11 -> DX12 transport", &r.draft.d3d11_use_d3d12_transport);
+                     ImGui::TextWrapped("Required for DLSS-NR in DX11 games.");
++                    ImGui::Checkbox("Quad precomposition (DX12 FG)", &r.draft.quad_precompose);
++                    ImGui::TextWrapped("Compose quad views into complete eyes before frame generation.");
++                    ImGui::TextWrapped("Note: Restart the game after changing this.");
+                     ImGui::Checkbox("Wait for quad-view composition (DX12)", &r.draft.d3d12_quad_compose_wait);
+                     ImGui::TextWrapped("Off: DX12 quad-view games such as MSFS return from xrEndFrame once the four-view composition is submitted, instead of waiting for the GPU to finish it.");
+                     ImGui::Checkbox("Use lower DLSS hook (DX12)", &r.draft.d3d12_lower_hook);
+@@ -1637,10 +1677,106 @@ void draw_overlay_ui(OverlayUiState& r,const OverlayRuntime& runtime,InputState&
+                     ImGui::TreePop();
+                 }
+                 }
++                if (std::string_view(renderer) != "Vulkan") {
++                    auto& focus = r.draft.quad_focus;
++                    ImGui::SeparatorText("Quad View Focus");
++                    const auto percent = [](const char* label, std::uint32_t& value, int min, int max) {
++                        int display = static_cast<int>(value);
++                        if (ImGui::SliderInt(label,&display,min,max,"%d%%",ImGuiSliderFlags_AlwaysClamp))
++                            value=static_cast<std::uint32_t>(display);
++                    };
++                    percent("Focus Width",focus.width,25,100);
++                    percent("Focus Height",focus.height,25,100);
++                    ImGui::TextWrapped("Save and restart to apply the focus render resolution.");
++                    ImGui::Checkbox("Match Stereo Borders",&focus.match_stereo_borders);
++                    ImGui::BeginDisabled(!focus.match_stereo_borders);
++                    ImGui::SliderFloat("Reference Distance",&focus.stereo_distance_m,quad_focus_min_distance_m,
++                        quad_focus_max_distance_m,"%.2f m",ImGuiSliderFlags_AlwaysClamp|ImGuiSliderFlags_Logarithmic);
++                    ImGui::TextWrapped("Aligns both eyes' focus borders at this distance.");
++                    ImGui::EndDisabled();
++                    ImGui::Checkbox("Custom Blend",&focus.custom_blend);
++                    ImGui::BeginDisabled(!focus.custom_blend);
++                    percent("Corner Radius",focus.radius,0,50);
++                    percent("Edge Feather",focus.feather,0,50);
++                    ImGui::EndDisabled();
++                    if (std::string_view(renderer) == "D3D11") {
++                        ImGui::Checkbox("Match Periphery Color",&focus.color_match);
++                    }
++                    ImGui::TextWrapped("Radius and feather use the shorter focus side.");
++                    if (!r.draft.quad_precompose)
++                        ImGui::TextWrapped("Note: Precompose eyes to use custom blend and color matching with DX12 frame generation.");
++
++                    ImGui::SeparatorText("Head Angle Offset");
++                    ImGui::Checkbox("Enable Head Angle Offset",&focus.head_offset);
++                    ImGui::BeginDisabled(!focus.head_offset);
++                    if (ImGui::Button("Recenter Focus")) command(r,runtime,"quad_focus_recenter");
++                    ImGui::EndDisabled();
++                    ImGui::SameLine();
++                    if (ImGui::Button("Reset Offset Settings")) command(r,runtime,"quad_focus_reset");
++                    ImGui::Text("Recenter shortcut: %s",focus_shortcut_name(input.focus_shortcut.load()).c_str());
++                    if (input.shortcut_target==ShortcutTarget::focus) {
++                        ImGui::TextWrapped("Press the same shortcut as in DCS. Escape cancels.");
++                        if (ImGui::Button("Cancel Shortcut Recording")) input.shortcut_target=ShortcutTarget::none;
++                    } else {
++                        if (ImGui::Button("Record Recenter Shortcut")) {
++                            begin_shortcut_recording(input,ShortcutTarget::focus);
++                            r.focus_shortcut_error.clear();
++                        }
++                        if (input.focus_shortcut) {
++                            ImGui::SameLine();
++                            if (ImGui::Button("Clear Shortcut"))
++                                r.focus_shortcut_error=save_focus_shortcut(input,0)?"":"Could not clear the recenter shortcut.";
++                        }
++                    }
++                    if (!r.focus_shortcut_error.empty()) ImGui::TextWrapped("%s",r.focus_shortcut_error.c_str());
++                    ImGui::BeginDisabled(!focus.head_offset);
++                    if (ImGui::BeginTable("head_angle_offset",3,ImGuiTableFlags_SizingStretchSame)) {
++                        ImGui::TableSetupColumn("Setting");
++                        ImGui::TableSetupColumn("Horizontal");
++                        ImGui::TableSetupColumn("Vertical");
++                        ImGui::TableHeadersRow();
++                        const std::array axes{&focus.horizontal,&focus.vertical};
++                        const auto row=[&](const char* label,const auto& field) {
++                            ImGui::PushID(label);
++                            ImGui::TableNextRow();
++                            ImGui::TableNextColumn();
++                            ImGui::TextUnformatted(label);
++                            for (unsigned axis=0;axis<axes.size();++axis) {
++                                ImGui::TableNextColumn();
++                                ImGui::PushID(static_cast<int>(axis));
++                                field(*axes[axis]);
++                                ImGui::PopID();
++                            }
++                            ImGui::PopID();
++                        };
++                        const auto value_row=[&](const char* label,float QuadFocusAxis::* member,
++                            float min,float max,const char* format) {
++                            row(label,[&](QuadFocusAxis& axis) {
++                                ImGui::SetNextItemWidth(-FLT_MIN);
++                                ImGui::SliderFloat("##value",&(axis.*member),min,max,format,ImGuiSliderFlags_AlwaysClamp);
++                            });
++                        };
++                        value_row("Fixed Offset",&QuadFocusAxis::bias,-quad_focus_max_bias_deg,quad_focus_max_bias_deg,"%.1f deg");
++                        value_row("Angle Dead Zone",&QuadFocusAxis::deadzone,0.f,10.f,"%.1f deg");
++                        value_row("Angle Gain",&QuadFocusAxis::angle_gain,-1.f,1.f,"%.2fx");
++                        ImGui::EndTable();
++                    }
++                    ImGui::EndDisabled();
++                }
+                 end_tab();
+             }
+             if (!game_hidden && begin_tab("DLSS-SR")) {
+                 draw_sr(r.draft, member(array_object(member(r.snapshot,"apis"),1),"reconstruction_feature") == "13",flag(member(r.snapshot,"quad_views"),"active"));
++                ImGui::SeparatorText("Adaptive Quality");
++                ImGui::Checkbox("Auto scale", &r.draft.quad_automatic_sr);
++                int target = static_cast<int>(r.draft.quad_quality_target_percent);
++                if (ImGui::SliderInt("FPS threshold", &target, 50, 90, "%d%%"))
++                    r.draft.quad_quality_target_percent = static_cast<unsigned>(target);
++                if (ImGui::IsItemHovered()) ImGui::SetTooltip("Percent of target FPS.");
++                const auto active_scale = number(r.snapshot, "quad_sr_active_scale");
++                if (r.draft.quad_automatic_sr && r.draft.enabled && r.draft.d3d11_use_d3d12_transport &&
++                    r.draft.center_supersampling > 1.0F && std::string_view(renderer) == "D3D11" && active_scale > 0)
++                    ImGui::Text("Active scale: %.2fx", active_scale);
+                 if (ImGui::Button("Reset SR defaults")) command(r, runtime, "defaults_sr");
+                 if (ImGui::CollapsingHeader("Performance##sr", ImGuiTreeNodeFlags_DefaultOpen))
+                     draw_sr_performance(r.snapshot, r.draft);
+@@ -1658,6 +1794,16 @@ void draw_overlay_ui(OverlayUiState& r,const OverlayRuntime& runtime,InputState&
+                     if (!reason.empty()) warning(reason.c_str());
+                 }
+                 draw_nr(r.draft,flag(member(r.snapshot,"quad_views"),"active"),r.snapshot);
++                if (flag(member(r.snapshot,"quad_views"),"active") && std::string_view(renderer)=="D3D11" &&
++                    r.draft.d3d11_use_d3d12_transport && r.draft.nr_enabled &&
++                    r.draft.nr_processing_order==NrProcessingOrder::before_upscaling) {
++                    ImGui::SeparatorText("Adaptive Quality");
++                    ImGui::Checkbox("Auto scale", &r.draft.quad_automatic_nr);
++                    int target = static_cast<int>(r.draft.quad_nr_target_percent);
++                    if (ImGui::SliderInt("FPS threshold", &target, 50, 90, "%d%%"))
++                        r.draft.quad_nr_target_percent = static_cast<unsigned>(target);
++                    if (ImGui::IsItemHovered()) ImGui::SetTooltip("Percent of target FPS.");
++                }
+                 if (ImGui::Button("Reset NR history / retry")) command(r, runtime, "reset_nr");
+                 ImGui::SameLine();
+                 if (ImGui::Button("Reset NR defaults")) command(r, runtime, "defaults_nr");
+diff --git a/standalone/overlay_ui.hpp b/standalone/overlay_ui.hpp
+index f23c621..6b3a768 100644
+--- a/standalone/overlay_ui.hpp
++++ b/standalone/overlay_ui.hpp
+@@ -3,13 +3,16 @@
+ #include "overlay_input.hpp"
+ #include "settings.hpp"
+ #include <string>
++#include <vector>
+ namespace cheeky::standalone {
+ struct OverlayUiState {
+     ULONGLONG next_snapshot{};
+     float menu_x{}, menu_y{}, menu_width{}, menu_height{};
+     cheeky::foveated_dlss::Settings draft{};
+-    std::string snapshot,message,menu_key_error;
++    std::string snapshot,message,menu_key_error,focus_shortcut_error;
++    std::vector<char> snapshot_buffer;
+     std::uint64_t attachment{},request{};
+ };
++void dispatch_focus_recenter(OverlayUiState&,const OverlayRuntime&,InputState&);
+ void draw_overlay_ui(OverlayUiState&,const OverlayRuntime&,InputState&,const char* renderer,const char* status,bool& open);
+ }
+diff --git a/tests/nr_processing_tests.cpp b/tests/nr_processing_tests.cpp
+index 88eb9bd..54aee50 100644
+--- a/tests/nr_processing_tests.cpp
++++ b/tests/nr_processing_tests.cpp
+@@ -238,10 +238,10 @@ int run_nr_processing_tests() {
+                 "Original tags not restored exactly once");
+         }
+         Settings settings;
+-        require(settings.nr_processing_order == NrProcessingOrder::after_upscaling,
+-            "Default order changed");
+-        require(nr_processing_order(2U) == NrProcessingOrder::after_upscaling &&
+-            nr_processing_order(~0U) == NrProcessingOrder::after_upscaling, "Invalid order accepted");
++        require(settings.nr_processing_order == NrProcessingOrder::before_upscaling,
++            "NR defaults to pre-upscaling");
++        require(nr_processing_order(2U) == NrProcessingOrder::universal &&
++            nr_processing_order(~0U) == NrProcessingOrder::after_upscaling, "NR order decoding changed");
+         settings.nr_working_scale = 0.37F;
+         settings.nr_processing_order = NrProcessingOrder::before_upscaling;
+         update_settings(settings);
+@@ -366,11 +366,43 @@ int run_nr_processing_tests() {
+         require(prepare_dlss_nr_input({}, settings) == nullptr && nr_test_evaluations == calls,
+             "Disabled NR evaluated");
+         settings.nr_enabled = true;
++        settings.nr_processing_order = NrProcessingOrder::after_upscaling;
+         require(prepare_dlss_nr_input({}, settings) == nullptr && nr_test_evaluations == calls,
+             "After mode executed before SR");
+         settings.nr_processing_order = NrProcessingOrder::before_upscaling;
+         require(prepare_dlss_nr_input({}, settings) == nullptr && nr_test_evaluations == calls + 1,
+             "Invalid before frame did not report exactly one failed attempt");
++        QuadNrTransition quality;
++        for (std::int64_t frame = 1; frame <= 3; ++frame) {
++            const auto first_eye = quality.update(1, frame, QuadNrQuality::half, 1.0F);
++            const auto second_eye = quality.update(1, frame, QuadNrQuality::bypass, 1.0F);
++            require(first_eye.active_scale == 0.0F &&
++                first_eye.result_weight == 1.0F - static_cast<float>(frame) / 4.0F &&
++                first_eye.result_weight == second_eye.result_weight && !second_eye.bypass,
++                "NR fade-out or same-frame stereo decision");
++        }
++        auto reduced = quality.update(1, 4, QuadNrQuality::half, 1.0F);
++        require(reduced.active_scale == 0.5F && reduced.result_weight == 0.0F && !reduced.bypass,
++            "NR extent changed before reaching original color");
++        for (std::int64_t frame = 5; frame <= 12; ++frame) {
++            reduced = quality.update(1, frame, QuadNrQuality::half, 1.0F);
++            require(reduced.result_weight == static_cast<float>(frame - 4) / 8.0F,
++                "NR half did not fade in over eight native frames");
++        }
++        require(reduced.result_weight == 1.0F && reduced.active_scale == 0.5F, "NR half did not fade in");
++        for (std::int64_t frame = 13; frame <= 16; ++frame)
++            reduced = quality.update(1, frame, QuadNrQuality::bypass, 1.0F);
++        require(reduced.bypass && reduced.result_weight == 0.0F, "NR bypass did not fade out");
++        auto restored = quality.update(1, 17, QuadNrQuality::configured, 1.0F);
++        require(!restored.bypass && restored.result_weight == 0.0F, "NR resume skipped fade-in");
++        restored = quality.update(1, 18, QuadNrQuality::configured, 1.0F);
++        require(restored.result_weight == 0.125F, "NR resume did not fade in");
++        restored = quality.update(1, 19, QuadNrQuality::bypass, 1.0F);
++        require(restored.bypass && restored.result_weight == 0.0F, "NR fade-in did not yield to a new target");
++        QuadNrTransition small_config;
++        for (std::int64_t frame = 1; frame <= 4; ++frame)
++            reduced = small_config.update(2, frame, QuadNrQuality::half, 0.4F);
++        require(reduced.bypass, "Half-tier request increased a low configured NR scale");
+         std::cout << "NR processing contract tests passed\n";
+         return 0;
+     } catch (const std::exception& error) {
+diff --git a/tests/openxr_binding/binding_tests.cpp b/tests/openxr_binding/binding_tests.cpp
+index 3b87cc0..e380fef 100644
+--- a/tests/openxr_binding/binding_tests.cpp
++++ b/tests/openxr_binding/binding_tests.cpp
+@@ -1,5 +1,11 @@
+ // Exercise production interceptors with a downstream runtime; no headset needed.
+ #include <d3d12.h>
++#include <functional>
++#include "../../shared/cheeky_fg_bridge.hpp"
++bool fg_control_query_observer(CheekyFgControl*);
++void fg_setup_observer();
++#define CHEEKY_FG_CONTROL_QUERY fg_control_query_observer
++#define CHEEKY_FG_SETUP_OBSERVER fg_setup_observer
+ void fg_barrier_observer(ID3D12Resource*,D3D12_RESOURCE_STATES,D3D12_RESOURCE_STATES);
+ void fg_submission_observer(bool);
+ #define CHEEKY_FG_BARRIER_OBSERVER fg_barrier_observer
+@@ -12,6 +18,15 @@ void fg_submission_observer(bool);
+ #include <dxgi1_4.h>
+ #include "../../src/fg_snapshot.hpp"
+ namespace {
++bool override_fg_control{};
++std::function<void()> observe_fg_setup;
++}
++bool fg_control_query_observer(CheekyFgControl* control) {
++    if(!override_fg_control)return false;
++    control->enabled=1;control->configuration=2;return true;
++}
++void fg_setup_observer() {if(observe_fg_setup)observe_fg_setup();}
++namespace {
+ bool observe_fg_barriers{};
+ bool fg_observed_generated{};
+ unsigned fg_barrier_errors{};
+@@ -448,6 +463,76 @@ void custom_binding_menu_test() {
+     fallback_profile = profile; fallback_tracking = true;
+     std::cout << "PASS custom SteamVR binding: host fallback aim, both triggers, release, ray loss, profile cleanup\n";
+ }
++void fg_timed_release_test() {
++    using namespace cheeky::fg;
++    BufferedPresenter presenter;
++    presenter.started=true;presenter.native11_release_point=9;presenter.multiplier=3;
++    presenter.pacing_active=true;presenter.active_multiplier=3;
++    presenter.display_clock.observe_refresh(120);
++    const auto start=TimingClock::time_point{std::chrono::seconds(1)};
++    const auto empty=TimingClock::time_point{};
++    check(presenter.timed_release_deadline(start)==empty,"Clock release opens the first application frame");
++    presenter.note_timed_begin(start);
++    const auto three=std::chrono::nanoseconds(presenter.display_clock.native_ns(3));
++    check(std::abs(three.count()-25000000LL)<=3,"120 Hz 3x uses a 25 ms native interval");
++    const auto deadline=start+three;
++    check(presenter.timed_release_deadline(start+std::chrono::milliseconds(1))==deadline&&
++        presenter.timed_release_deadline(start+std::chrono::milliseconds(2))==deadline&&presenter.next_timed_begin==deadline,
++        "Wait queries retain one shared phase deadline instead of adding another interval");
++    check(presenter.timed_release_deadline(deadline)==empty,"Clock release opens at its deadline");
++    presenter.note_timed_begin(deadline+std::chrono::milliseconds(2));
++    check(presenter.timed_release_deadline(deadline+std::chrono::milliseconds(3))==start+three*2,
++        "A late wake keeps the original clock phase");
++    presenter.note_timed_begin(start+three*2+std::chrono::milliseconds(2));
++    check(presenter.timed_release_deadline(start+three*2+std::chrono::milliseconds(3))==start+three*3,
++        "Repeated wake delays do not accumulate into the clock period");
++    const auto late=start+std::chrono::milliseconds(103);
++    check(presenter.timed_release_deadline(late)==empty,"Missed intervals do not hold a late frame");
++    presenter.note_timed_begin(late);
++    check(presenter.timed_release_deadline(late+std::chrono::nanoseconds(1))==start+three*5,
++        "A long frame skips missed ticks and leaves exactly one future deadline");
++    presenter.multiplier=2;
++    check(presenter.timed_release_deadline(late)==empty,"A multiplier change resets the clock anchor");
++    presenter.note_timed_begin(late);
++    const auto two=std::chrono::nanoseconds(presenter.display_clock.native_ns(2));
++    check(std::abs(two.count()-16666667LL)<=2&&
++        presenter.timed_release_deadline(late+std::chrono::nanoseconds(1))==late+two,
++        "120 Hz 2x uses one 16.67 ms native interval");
++    XrFrameEndInfo passthrough{XR_TYPE_FRAME_END_INFO};presenter.raw=&passthrough;presenter.pacing_active=false;
++    check(presenter.production_multiplier()==2,"Clock diagnostics retain the requested multiplier during passthrough");
++    check(presenter.timed_release_deadline(late+std::chrono::nanoseconds(1))==late+two&&presenter.next_timed_begin==late+two,
++        "Native passthrough retains the clock anchor while interpolation telemetry is inactive");
++    presenter.raw=nullptr;
++    check(presenter.timed_release_deadline(late+std::chrono::nanoseconds(1))==late+two,
++        "Ending passthrough preserves the requested fixed-multiplier clock");
++    presenter.native11_release_point=3;
++    check(presenter.timed_release_deadline(late)==empty&&presenter.next_timed_begin==empty,
++        "Leaving clock release resets the timer");
++    presenter.native11_release_point=9;presenter.note_timed_begin(late);
++    presenter.started=false;
++    check(presenter.timed_release_deadline(late)==empty&&presenter.next_timed_begin==empty,
++        "Retiring the FG presenter resets the timer");
++    presenter.started=true;presenter.note_timed_begin(late);presenter.native_nr_only=true;
++    check(presenter.timed_release_deadline(late)==empty&&presenter.next_timed_begin==empty,
++        "Native NR without frame generation resets the timer");
++    presenter.native_nr_only=false;
++    const auto watchdog_now=TimingClock::now();presenter.note_timed_begin(watchdog_now);
++    presenter.gate_held_since=watchdog_now-std::chrono::seconds(1);presenter.release_gate_watchdog(watchdog_now);
++    check(presenter.gate_timeouts==0&&presenter.gate_held_since==empty,
++        "Clock deadlines do not trigger the FG completion watchdog");
++    presenter.next_timed_begin={};
++    presenter.inflight_id=11;presenter.inflight_release_point=3;presenter.awaiting_generated_submission=11;
++    auto queued=std::make_shared<BufferedNative>();queued->id=12;queued->guides_valid=true;queued->policy.release_point=3;
++    presenter.pending.push_back(queued);
++    check(!presenter.release_gate_active()&&!presenter.generated_submission_pending()&&!presenter.unsubmitted_native(),
++        "Clock release bypasses old in-flight and queued FG gates");
++    check(presenter.producer_has_capacity(),"Clock release retains available bounded queue capacity");
++    presenter.pending.push_back(std::make_shared<BufferedNative>());
++    check(!presenter.producer_has_capacity()&&presenter.pending.size()==presenter.max_pending(),
++        "Clock release preserves native queue backpressure");
++    presenter.started=false;
++    std::cout<<"PASS FG timed release: fixed-phase deadlines, skipped ticks, policy resets and bounded queues\n";
++}
+ void fg_reset_clock_test() {
+     // DCS's menu can produce 180 frames/s while VDXR presents at 120 Hz.
+     // Repeated waits against one runtime prediction must not accumulate a
+@@ -632,6 +717,42 @@ void fg_lifecycle_retirement_test() {
+     std::cout<<"PASS FG session restart/end and swapchain retirement outside the state lock\n";
+ }
+ 
++void fg_replacement_no_overlap_test() {
++    reset();
++    bool old_reset{},old_destroyed{},outside_state_lock{};
++    struct OldOwner final:cheeky::fg::Presenter {
++        bool& reset_done;bool& destroyed;bool& outside;
++        std::unique_ptr<int> resource=std::make_unique<int>(1);
++        OldOwner(bool& r,bool& d,bool& o):reset_done(r),destroyed(d),outside(o){}
++        void reset() noexcept override {
++            std::thread callback([&]{outside=state_mutex.try_lock();if(outside)state_mutex.unlock();});
++            callback.join();resource.reset();reset_done=true;
++        }
++        ~OldOwner() override {destroyed=true;}
++    };
++    const auto session=h<XrSession>(2);
++    SessionState owner{};owner.session=session;owner.instance=instance;owner.running=true;
++    owner.graphics_api=11;owner.view_configuration=XR_VIEW_CONFIGURATION_TYPE_PRIMARY_STEREO;
++    owner.fg_requested=true;
++    auto old=std::make_shared<OldOwner>(old_reset,old_destroyed,outside_state_lock);old->configuration=1;
++    std::weak_ptr<OldOwner> lifetime=old;owner.fg=std::move(old);
++    sessions.emplace(session,std::move(owner));
++    struct SetupReached {};
++    bool reached{};
++    observe_fg_setup=[&]{
++        check(old_reset&&old_destroyed&&lifetime.expired(),"New FG setup starts after old resource owner destruction");
++        check(outside_state_lock,"Old FG resource retirement occurs outside state_mutex");
++        reached=true;throw SetupReached{};
++    };
++    override_fg_control=true;
++    XrFrameState frame{XR_TYPE_FRAME_STATE};
++    try {wait_frame_once(session,nullptr,&frame,false);}catch(const SetupReached&){}
++    catch(...){override_fg_control=false;observe_fg_setup={};throw;}
++    override_fg_control=false;observe_fg_setup={};sessions.clear();
++    check(reached,"FG replacement reaches the production allocation boundary");
++    std::cout<<"PASS FG replacement: old reset and owner destruction precede new setup; retirement outside state lock\n";
++}
++
+ void fg_borrowed_frame_shutdown_test() {
+     static std::mutex runtime_mutex;
+     static std::condition_variable runtime_changed;
+@@ -1230,6 +1351,7 @@ void diagnostic_lifetime_test() {
+ #include "fg_parity_validation.hpp"
+ #include "fg_confidence_validation.hpp"
+ #include "fg_optical_validation.hpp"
++#include "fg_optical_r8_validation.hpp"
+ #include "fg_optical_image_validation.hpp"
+ #include "fg_shader11_ngx_probe.hpp"
+ #include "fg_shader11_nvapi_probe.hpp"
+@@ -1238,9 +1360,12 @@ void diagnostic_lifetime_test() {
+ #include "submission_diagnostics_validation.hpp"
+ #include "color_scale_bias_validation.hpp"
+ #include "nr_native_validation.hpp"
++#include "quad_native_pool_validation.hpp"
+ int main(int argc,char** argv) {
+     std::cout.setf(std::ios::unitbuf);
+     try {
++        if(argc>1&&std::string(argv[1])=="--quad-native-pool") {quad_native_pool_validation();return 0;}
++        if(argc>1&&std::string(argv[1])=="--quad-shared-color") {quad_shared_color_validation();return 0;}
+         if(argc>1&&std::string(argv[1])=="--openxr-stereo-alignment") {stereo_alignment_validation();return 0;}
+         if(argc>1&&std::string(argv[1])=="--nr-native") {submission_diagnostics_validation();color_scale_bias_validation();native_nr_validation();return 0;}
+         if(argc>1&&std::string(argv[1])=="--menu-live-cursor") {
+@@ -1252,11 +1377,14 @@ int main(int argc,char** argv) {
+         if(argc>1&&std::string(argv[1])=="--fg-latest-interval") {fg_latest_interval_validation();return 0;}
+         if(argc>1&&std::string(argv[1])=="--fg-capture-release") {fg_capture_release_validation();fg_pipelined_capture_validation();return 0;}
+         if(argc>1&&std::string(argv[1])=="--fg-release-watchdog") {fg_release_watchdog_validation();return 0;}
++        if(argc>1&&std::string(argv[1])=="--fg-timed-release") {fg_timed_release_test();return 0;}
+         if(argc>1&&std::string(argv[1])=="--fg-gaze-motion") {fg_gaze_motion_validation();return 0;}
+         if(argc>1&&std::string(argv[1])=="--fg-confidence-motion") {fg_confidence_motion_validation();return 0;}
+         if(argc>1&&std::string(argv[1])=="--fg-methods") {fg_cross_api_parity();return 0;}
+         if(argc>1&&std::string(argv[1])=="--fg-optical-cache") {fg_optical_cache_validation();return 0;}
+         if(argc>1&&std::string(argv[1])=="--fg-optical-image") {fg_optical_image_validation();return 0;}
++        if(argc>1&&std::string(argv[1])=="--fg-optical-r8") {fg_optical_r8_validation();return 0;}
++    if(argc>1&&std::string(argv[1])=="--fg-hybrid") {fg_hybrid_validation();return 0;}
+         if(argc>1&&std::string(argv[1])=="--fg-optical-options") {fg_optical_cache_validation(true);return 0;}
+         if(argc>1&&std::string(argv[1])=="--fg-optical") {fg_optical_validation(argc>2&&std::string(argv[2])=="quick");return 0;}
+         if(argc>1&&std::string(argv[1])=="--fg-optical-profile") {fg_optical_profile();return 0;}
+@@ -1276,6 +1404,7 @@ int main(int argc,char** argv) {
+         if(argc>1&&std::string(argv[1])=="--fg-pacing-sim") {pacing_sim::fg_pacing_simulation(argc>2?std::stod(argv[2]):12.,argc>3?argv[3]:nullptr,argc>4?argv[4]:nullptr);return 0;}
+         if(argc>1&&std::string(argv[1])=="--quad-capture") {quad_capture_validation();return 0;}
+         if(argc>1&&std::string(argv[1])=="--quad-d3d11") {quad_capture_d3d11_validation();return 0;}
++        if(argc>1&&std::string(argv[1])=="--quad-color-match") {quad_color_match_validation();return 0;}
+         if(argc>1&&std::string(argv[1])=="--quad-roles") {quad_role_mapping_validation();return 0;}
+         if(argc>1&&std::string(argv[1])=="--quad-version") {quad_version_validation();return 0;}
+         frame_space_lifetime_test();
+@@ -1287,7 +1416,7 @@ int main(int argc,char** argv) {
+         if(argc>1&&std::string(argv[1])=="--fg-reset-clock") {fg_reset_clock_test();return 0;}
+         if(argc>1&&std::string(argv[1])=="--fg-reset-resume") {fg_reset_native_resume_test();return 0;}
+         if(argc>1&&std::string(argv[1])=="--fg-native-handoff") {fg_reset_clock_test();fg_reset_native_resume_test();fg_native_handoff_test();return 0;}
+-        if(argc>1&&std::string(argv[1])=="--fg-lifecycle") {fg_lifecycle_retirement_test();fg_borrowed_frame_shutdown_test();return 0;}
++        if(argc>1&&std::string(argv[1])=="--fg-lifecycle") {fg_lifecycle_retirement_test();fg_replacement_no_overlap_test();fg_borrowed_frame_shutdown_test();return 0;}
+         if(argc>1&&std::string(argv[1])=="--fg-borrowed-shutdown") {fg_borrowed_frame_shutdown_test();return 0;}
+         if(argc>1&&std::string(argv[1])=="--fg-hardening") {fg_hardening_validation();return 0;}
+         if(argc>2 && (std::string(argv[1])=="--fg-capability" || std::string(argv[1])=="--fg-generate" || std::string(argv[1])=="--fg-buffered"||std::string(argv[1])=="--fg-motion"||std::string(argv[1])=="--fg-crop-motion")) {
+diff --git a/tests/overlay_tests.cpp b/tests/overlay_tests.cpp
+index c860bff..be35b11 100644
+--- a/tests/overlay_tests.cpp
++++ b/tests/overlay_tests.cpp
+@@ -105,6 +105,15 @@ void test_shared_menu11() {
+ // objects. This catches incorrect JSON-member selection and misleading status
+ // warnings without depending on a headset or a particular GPU timing sample.
+ void test_ui_diagnostics() {
++    Settings stereo_settings;
++    require(set_named_setting(stereo_settings,"QuadMatchStereoBorders","1")&&stereo_settings.quad_focus.match_stereo_borders&&
++        settings_json(stereo_settings).find("\"QuadMatchStereoBorders\":true")!=std::string::npos&&
++        serialize_settings(stereo_settings).find("QuadMatchStereoBorders=1")!=std::string::npos,
++        "Stereo borders round trip through runtime settings");
++    require(set_named_setting(stereo_settings,"QuadStereoDistanceM","2.5")&&
++        settings_json(stereo_settings).find("\"QuadStereoDistanceM\":2.5")!=std::string::npos&&
++        serialize_settings(stereo_settings).find("QuadStereoDistanceM=2.5")!=std::string::npos,
++        "Stereo border distance round trips through runtime settings");
+     SetErrorMode(SEM_FAILCRITICALERRORS | SEM_NOGPFAULTERRORBOX);
+     auto* context = ImGui::CreateContext();
+     auto& io = ImGui::GetIO();
+@@ -251,6 +260,8 @@ void test_ui_diagnostics() {
+     state.snapshot = general_snapshot;
+ 
+     render("DLSS-SR"); text = render("DLSS-SR");
++    require(text.find("FPS threshold") != text.npos && text.find("Active scale:") == text.npos,
++        "SR threshold remains visible before adaptive SR runs");
+     require(text.find("Use lower DLSS hook (DX12)") == text.npos, "Hook selector should live in General");
+     require(text.find("Cosmetic only; no performance impact.") != text.npos, "SR roundness note missing");
+     require(text.find("Full DLSS: 2.000 ms") != text.npos, "GPU timing from the second API object");
+@@ -265,6 +276,17 @@ void test_ui_diagnostics() {
+     render("DLSS-SR");text=render("DLSS-SR");
+     require(text.find("Original DLSS: 2.000 ms")!=text.npos&&text.find("Original peripheral DLSS: 0.800 ms")!=text.npos&&
+         text.find("Foveated DLSS: 1.250 ms")!=text.npos&&text.find("Peripheral DLSS: 0.500 ms")!=text.npos,"Quad timing rows must use separate original/peripheral measurements");
++    render_api = "D3D11";
++    state.draft.quad_automatic_sr = true;
++    state.draft.d3d11_use_d3d12_transport = true;
++    state.draft.center_supersampling = 1.2F;
++    state.snapshot = R"({"quad_views":{"active":true},"quad_sr_active_scale":1.0})";
++    text = render("DLSS-SR");
++    require(text.find("Active scale: 1.00x") != text.npos, "SR reports the submitted tier");
++    state.draft.quad_automatic_sr = false;
++    state.draft.d3d11_use_d3d12_transport = false;
++    state.draft.center_supersampling = 1.0F;
++    render_api = "D3D12";
+     state.snapshot=general_snapshot;
+     require(text.find("Full DLSS-NR call") == text.npos, "NR timings should not appear in SR");
+     render("DLSS-NR"); text = render("DLSS-NR");
+@@ -432,7 +454,8 @@ void test_ui_diagnostics() {
+         const OverlayRuntime fixture{1,
+             [](std::uint64_t,const char* command){if(std::string_view(command).find("\nset\n")!=std::string_view::npos)++sets;return true;},
+             [](char* output,std::uint32_t capacity){
+-                const auto text="{\"game_dlss\":"+game+",\"settings\":"+settings_json(live)+"}";
++                const auto text="{\"game_dlss\":"+game+",\"settings\":"+settings_json(live)+
++                    ",\"view_details_fixture\":\""+std::string(35 * 1024, 'x')+"\"}";
+                 return strcpy_s(output,capacity,text.c_str())==0;},"Test"};
+         live=state.draft;live.fg.enabled=true;live.fg.foveated=true;live.fg.match_sr_region=true;
+         live.fg.center_method=cheeky_fg_dlss;live.fg.peripheral_method=cheeky_fg_dlss_vectors_simple;
+@@ -507,10 +530,11 @@ bool snapshot(char* output, std::uint32_t capacity) {
+     const auto text = "{\"message\":\"Overlay regression fixture\",\"settings\":" + settings_json(settings) + "}";
+     return strcpy_s(output, capacity, text.c_str()) == 0;
+ }
+-unsigned setting_commands{};
++unsigned setting_commands{},focus_recenter_commands{};
+ bool command(std::uint64_t attachment, const char* text) {
+     if (attachment != 1) return false;
+     std::string_view request(text);
++    if (request.find("\nquad_focus_recenter\n")!=request.npos) ++focus_recenter_commands;
+     const auto start = request.find("\nset\n");
+     if (start == request.npos) return true;
+     request.remove_prefix(start + 5);
+@@ -1009,9 +1033,10 @@ int main(int argc, char** argv) {
+             (std::wstring(L"CheekyOverlayTests-") + std::to_wstring(GetCurrentProcessId()) + L".ini");
+         input->config_path = test_ini.wstring();
+         toggle(window.value);
+-        begin_menu_key_rebind(*input);
++        begin_shortcut_recording(*input,ShortcutTarget::menu);
+         SendMessageW(window.value, WM_KEYDOWN, VK_F9, 1);
+-        require(consume_menu_key_rebind(*input) == VK_F9, "Rebind did not capture F9");
++        const auto rebound=input->recorded_shortcut.exchange(RecordedShortcut{});
++        require(rebound.target==ShortcutTarget::menu&&rebound.key==VK_F9,"Rebind did not capture F9");
+         require(save_menu_key(*input, VK_F9), "Rebind did not save F9");
+         SendMessageW(window.value, WM_KEYUP, VK_F9, LPARAM{1} << 31);
+         require(GetPrivateProfileIntW(L"Overlay", L"MenuKey", 0, test_ini.c_str()) == VK_F9,
+@@ -1029,18 +1054,56 @@ int main(int argc, char** argv) {
+         SendMessageW(window.value, WM_KEYUP, VK_F9, LPARAM{1} << 31);
+         gpu.clear(); overlay_present(gpu.swapchain.Get(), gpu.queue.Get(), runtime); gpu.idle();
+         require(gpu.pixels() != baseline, "F9 did not reopen the rebound menu");
+-        begin_menu_key_rebind(*input);
++        begin_shortcut_recording(*input,ShortcutTarget::menu);
+         SendMessageW(window.value, WM_KEYDOWN, VK_ESCAPE, 1);
+-        require(consume_menu_key_rebind(*input) == VK_ESCAPE && input->menu_key == VK_F9,
++        const auto cancelled=input->recorded_shortcut.exchange(RecordedShortcut{});
++        require(cancelled.key==VK_ESCAPE&&input->menu_key==VK_F9,
+             "Escape did not cancel the key change");
+         SendMessageW(window.value, WM_KEYUP, VK_ESCAPE, LPARAM{1} << 31);
+         require(save_menu_key(*input, VK_F8), "Could not restore F8 after rebind test");
+         require(GetPrivateProfileIntW(L"Overlay", L"MenuKey", 0, test_ini.c_str()) == VK_F8,
+             "F8 reset did not persist");
+-        DeleteFileW(test_ini.c_str());
++        begin_shortcut_recording(*input,ShortcutTarget::focus);
++        test_f8_down=true;
++        SendMessageW(window.value,WM_KEYDOWN,VK_F8,1);
++        overlay_present(gpu.swapchain.Get(),gpu.queue.Get(),runtime);pump();
++        require(input->open&&!input->focus_shortcut,"Recording the menu key must not toggle the menu");
++        test_f8_down=false;
++        SendMessageW(window.value,WM_KEYUP,VK_F8,LPARAM{1}<<31);
++
++        begin_shortcut_recording(*input,ShortcutTarget::focus);
++        input->open=false; // Same close transition as the ImGui title-bar button.
++        test_f8_down=true;
++        overlay_present(gpu.swapchain.Get(),gpu.queue.Get(),runtime);pump();
++        require(input->open&&input->shortcut_target==ShortcutTarget::none,"Closing the menu must cancel recording and leave polling active");
++        test_f8_down=false;
++        overlay_present(gpu.swapchain.Get(),gpu.queue.Get(),runtime);
++        begin_shortcut_recording(*input,ShortcutTarget::focus);
++        SendMessageW(window.value,WM_KEYDOWN,VK_F6,1);
++        const auto focus_binding=input->recorded_shortcut.exchange(RecordedShortcut{});
++        require(focus_binding.target==ShortcutTarget::focus&&focus_binding.key==VK_F6&&
++            save_focus_shortcut(*input,focus_binding.key),"Record and save recenter shortcut");
++        SendMessageW(window.value,WM_KEYUP,VK_F6,LPARAM{1}<<31);
++        SendMessageW(window.value,WM_KEYDOWN,VK_F6,1);
++        SendMessageW(window.value,WM_KEYUP,VK_F6,LPARAM{1}<<31);
++        overlay_present(gpu.swapchain.Get(),gpu.queue.Get(),runtime);
++        require(focus_recenter_commands==0,"An open menu suppresses the recenter shortcut");
+         toggle(window.value);
+         gpu.clear(); overlay_present(gpu.swapchain.Get(), gpu.queue.Get(), runtime); gpu.idle();
+         require(gpu.pixels() == baseline, "Reset F8 did not close the menu");
++        const auto keys_before_recenter=game_keys;
++        test_extra_key=VK_F6;test_extra_down=true;
++        SendMessageW(window.value,WM_KEYDOWN,VK_F6,1);
++        overlay_present(gpu.swapchain.Get(),gpu.queue.Get(),runtime);
++        SendMessageW(window.value,WM_KEYDOWN,VK_F6,(LPARAM{1}<<30)|1);
++        overlay_present(gpu.swapchain.Get(),gpu.queue.Get(),runtime);
++        test_extra_down=false;
++        SendMessageW(window.value,WM_KEYUP,VK_F6,LPARAM{1}<<31);
++        require(focus_recenter_commands==1&&game_keys==keys_before_recenter+3,
++            "Recenter occurs once and the game receives the original key messages");
++        require(GetPrivateProfileIntW(L"Overlay",L"FocusRecenterShortcut",0,test_ini.c_str())==VK_F6&&
++            save_focus_shortcut(*input,0),"Recenter shortcut persists and can be cleared");
++        DeleteFileW(test_ini.c_str());
+         test_foreground = nullptr; toggle(window.value);
+         gpu.clear(); overlay_present(gpu.swapchain.Get(), gpu.queue.Get(), runtime);
+         require(gpu.pixels() == baseline, "Unfocused F8 opened the overlay");
+diff --git a/tests/uevr_tests.cpp b/tests/uevr_tests.cpp
+index bf31d0b..edd4748 100644
+--- a/tests/uevr_tests.cpp
++++ b/tests/uevr_tests.cpp
+@@ -131,7 +131,7 @@ void settings_tests(const std::filesystem::path& root) {
+             "FG settings validate types");
+         require(set_named_setting(fg,"FgReleasePoint","1")&&fg.fg.release_point==1&&
+             set_named_setting(fg,"FgReleasePoint","3")&&set_named_setting(fg,"FgReleasePoint","4")&&fg.fg.release_point==4&&
+-            set_named_setting(fg,"FgReleasePoint","5")&&fg.fg.release_point==5&&set_named_setting(fg,"FgReleasePoint","6")&&fg.fg.release_point==6&&set_named_setting(fg,"FgReleasePoint","7")&&fg.fg.release_point==7&&set_named_setting(fg,"FgReleasePoint","8")&&fg.fg.release_point==8&&!set_named_setting(fg,"FgReleasePoint","9")&&!set_named_setting(fg,"FgReleasePoint","-1"),"Release points validate");
++            set_named_setting(fg,"FgReleasePoint","5")&&fg.fg.release_point==5&&set_named_setting(fg,"FgReleasePoint","6")&&fg.fg.release_point==6&&set_named_setting(fg,"FgReleasePoint","7")&&fg.fg.release_point==7&&set_named_setting(fg,"FgReleasePoint","8")&&fg.fg.release_point==8&&set_named_setting(fg,"FgReleasePoint","9")&&fg.fg.release_point==9&&!set_named_setting(fg,"FgReleasePoint","10")&&!set_named_setting(fg,"FgReleasePoint","-1"),"Release points validate");
+         require(set_named_setting(fg,"FgReleasePoint","3"),"Select generated submission for persistence");
+         for(const auto key:{"FgHooklessMode3","FgBackbufferFrameId","FgDepthBits","FgMotionBits","FgSubmitRepeats","FgGuideCaptureMode","FgCompactStorage",
+                 "FgColorCaptureMode","FgUploadMode","FgDirectPeripheralShading","FgDiagnosticMode",
+@@ -160,6 +160,13 @@ void settings_tests(const std::filesystem::path& root) {
+             require(cheeky_fg_shader_only(method,method,true),"Combined methods use the shader backend");
+         }
+         require(!set_named_setting(fg,"FgCenterMethod","13")&&!set_named_setting(fg,"FgPeripheralMethod","14"),"Unknown combined methods are rejected");
++        for(const auto retired:{"14","15"}){
++            const auto legacy=root/"retired-fg.ini";
++            {std::ofstream file(legacy);file<<"[CheekyFoveatedDLSS]\nFgCenterMethod="<<retired<<"\nFgMultiplier=3\n";}
++            Settings loaded;std::string error;
++            require(!set_named_setting(loaded,"FgCenterMethod",retired)&&read_settings_file(legacy,loaded,error)&&
++                loaded.fg.center_method==cheeky_fg_optical_flow&&loaded.fg.multiplier==3,"Retired center methods migrate without discarding the profile");
++        }
+         require(set_named_setting(fg,"FgCenterMethod","5"),"Restore Optical Flow Simple Warping for the settings round trip");
+         for(const auto retired:{"FgOpticalCenterCache","FgOpticalPeripheralCache","FgOpticalRgbInput","FgOpticalFullEye"})
+             require(set_named_setting(fg,retired,"false")&&set_named_setting(fg,retired,"true"),"Retired optical options load harmlessly without changing fixed policy");
+@@ -288,8 +295,8 @@ void settings_tests(const std::filesystem::path& root) {
+             "Invalid NR order file was not rejected atomically");
+     }
+     { std::ofstream out(path); out << "[CheekyFoveatedDLSS]\nSchemaVersion=1\nAfwDepthCoverage=1\nNrWorkingScale=0.37\n"; }
+-    require(read_settings_file(path, r, error) && r.nr_processing_order == NrProcessingOrder::after_upscaling &&
+-        r.nr_working_scale == 0.37f, "Missing NR order must default to After");
++    require(read_settings_file(path, r, error) && r.nr_processing_order == NrProcessingOrder::before_upscaling &&
++        r.nr_working_scale == 0.37f, "Missing NR order must default to Before");
+     require(r.nr_style == 0U, "Legacy settings must restore Standard style");
+     require(r.d3d12_lower_hook, "Legacy settings default to lower hook even over a higher-hook draft");
+     require(!r.fix_motion_blur, "Legacy settings cannot inherit compatibility copies");
+@@ -344,6 +351,7 @@ int main(int argc, char** argv) {
+         const auto root = bin / "uevr-test-data" / run;
+         std::filesystem::create_directories(root); directory = root.wstring();
+         settings_tests(root);
++        if(argc>1&&std::string(argv[1])=="--settings-only"){puts("Settings parsing, persistence and reset passed");return 0;}
+         const auto issue = support_issue_url(L"report #&.zip", "state & details\n");
+         require(issue.starts_with(L"https://github.com/ClarkCheekyKent/CheekyFoveatedDLSS/issues/new?") &&
+             issue.find(L"report=report%20%23%26.zip") != issue.npos && issue.find(L"diagnostics=state%20%26%20details%0A") != issue.npos,
+@@ -951,9 +959,9 @@ int main(int argc, char** argv) {
+                 field(received,"NrProcessingOrder") == 0 && std::abs(field(received,"NrWorkingScale")-0.37)<0.0001,
+                 "Invalid order command must reject the whole transaction");
+         }
+-        command("1\n40\nset\nNrProcessingOrder=1\nNrIntensity=0.4\nGazeSmoothingMs=60");
++        command("1\n40\nset\nNrProcessingOrder=0\nNrIntensity=0.4\nGazeSmoothingMs=60");
+         command("1\n41\ndefaults_nr");
+-        require(std::abs(field(received,"Width")-0.65)<0.0001 && field(received,"NrIntensity")==1 && field(received,"NrProcessingOrder")==0 && field(received,"GazeSmoothingMs")==60,
++        require(std::abs(field(received,"Width")-0.65)<0.0001 && field(received,"NrIntensity")==1 && field(received,"NrProcessingOrder")==1 && field(received,"GazeSmoothingMs")==60,
+             "NR reset preserves SR and gaze");
+         command("1\n42\nset\nNrIntensity=0.4\nNrProcessingOrder=1");
+         command("1\n43\ndefaults_gaze");
+diff --git a/uevr/runtime.cpp b/uevr/runtime.cpp
+index 0ee9e65..62fd42c 100644
+--- a/uevr/runtime.cpp
++++ b/uevr/runtime.cpp
+@@ -509,7 +509,8 @@ std::string snapshot_locked(State& s) {
+             << ",\"fov_tangents\":[" << v.fov_tangents[0] << ',' << v.fov_tangents[1]
+             << ',' << v.fov_tangents[2] << ',' << v.fov_tangents[3] << "]}";
+     }
+-    out << "]},\"nr\":\"" << json_escape(dlss_nr_state_name(nr.state)) << "\",\"nr_details\":{"
++    out << "]},\"quad_sr_active_scale\":" << quad_sr_active_scale()
++        << ",\"nr\":\"" << json_escape(dlss_nr_state_name(nr.state)) << "\",\"nr_details\":{"
+         << "\"route\":\"" << json_escape(dlss_nr_route_name(nr.route)) << "\",\"candidates\":" << nr.candidate_calls
+         << ",\"evaluations\":" << nr.evaluation_calls << ",\"failures\":" << nr.failed_calls << ",\"result\":" << nr.last_result
+         << ",\"output_width\":" << nr.output_width << ",\"output_height\":" << nr.output_height
+@@ -1069,6 +1070,17 @@ extern "C" __declspec(dllexport) bool CheekyRuntime_Command(std::uint64_t attach
+                 update_settings(settings);++s.revision;request_save(s);}
+             return ok;
+         }
++        if (action == "quad_focus_recenter") { recenter_quad_focus(); return true; }
++        if (action == "quad_focus_reset") {
++            auto settings=configured_settings();
++            settings.quad_focus.head_offset=false;
++            settings.quad_focus.horizontal=settings.quad_focus.vertical=QuadFocusAxis{};
++            update_settings(settings);
++            recenter_quad_focus();
++            ++s.revision;
++            request_save(s);
++            return true;
++        }
+         if(action=="quad_recalibrate"){auto settings=configured_settings();settings.quad_saved_roles={};settings.quad_saved_source_count=0;
+             update_settings(settings);quad_view_recalibrate();++s.revision;request_save(s);return true;}
+         if (action == "mark_vram_baseline") {
+diff --git a/uevr/scripts/cheeky_foveated_dlss.lua b/uevr/scripts/cheeky_foveated_dlss.lua
+index e47aec6..13ffe79 100644
+--- a/uevr/scripts/cheeky_foveated_dlss.lua
++++ b/uevr/scripts/cheeky_foveated_dlss.lua
+@@ -223,7 +223,7 @@ end
+ -- depend on a method are drawn from it, so they match before the switch lands.
+ local function fg_runs(method)
+     if method == nil or not fallback("fg_fallback") then return method end
+-    if method == 0 then return 7 elseif method >= 1 and method <= 4 then return method + 4
++    if method == 0 or method == 15 then return 7 elseif method >= 1 and method <= 4 then return method + 4
+     elseif method >= 9 and method <= 12 then return method - 4 end
+     return method
+ end
+@@ -813,7 +813,6 @@ uevr.lua.add_script_panel("Cheeky Foveated DLSS", function()
+             if draft.FgDlssgPreset ~= nil and not fg_hidden and ((draft.FgCenterMethod or 0) == 0 or
+                     (draft.FgFoveated and draft.FgPeripheralMethod == 0)) then
+                 combo("DLSS-G preset", "FgDlssgPreset", {[1]="Preset A", [2]="Preset B", [3]="Preset C"})
+-                if draft.FgDlssgPreset == 2 then text("Preset B needs separate scene and HUD inputs; without them it behaves like Preset A.") end
+                 if draft.FgDlssgPreset == 3 then text("Preset C uses the faster Lite model and requires DLSS-G 310.9.16 or newer.") end
+             end
+             local optical_presets = {[0]="Slow (quality)", [1]="Medium", [2]="Fast (performance)"}
+diff --git a/uevr/settings_fields.inc b/uevr/settings_fields.inc
+index 8c8fd64..ae96c54 100644
+--- a/uevr/settings_fields.inc
++++ b/uevr/settings_fields.inc
+@@ -37,6 +37,22 @@ CHEEKY_SETTING("Enabled", enabled)
+ CHEEKY_SETTING("D3D12LowerHook", d3d12_lower_hook)
+ CHEEKY_SETTING("D3D11D3D12Transport", d3d11_use_d3d12_transport)
+ CHEEKY_SETTING("D3D12QuadComposeWait", d3d12_quad_compose_wait)
++CHEEKY_SETTING("QuadPrecompose", quad_precompose)
++CHEEKY_SETTING("QuadFocusWidth", quad_focus.width)
++CHEEKY_SETTING("QuadFocusHeight", quad_focus.height)
++CHEEKY_SETTING("QuadMatchStereoBorders", quad_focus.match_stereo_borders)
++CHEEKY_SETTING("QuadStereoDistanceM", quad_focus.stereo_distance_m)
++CHEEKY_SETTING("QuadCustomBlend", quad_focus.custom_blend)
++CHEEKY_SETTING("QuadCornerRadius", quad_focus.radius)
++CHEEKY_SETTING("QuadEdgeFeather", quad_focus.feather)
++CHEEKY_SETTING("QuadColorMatch", quad_focus.color_match)
++CHEEKY_SETTING("QuadHeadOffset", quad_focus.head_offset)
++CHEEKY_SETTING("QuadFocusHorizontalBias", quad_focus.horizontal.bias)
++CHEEKY_SETTING("QuadFocusHorizontalAngleGain", quad_focus.horizontal.angle_gain)
++CHEEKY_SETTING("QuadFocusHorizontalDeadzone", quad_focus.horizontal.deadzone)
++CHEEKY_SETTING("QuadFocusVerticalBias", quad_focus.vertical.bias)
++CHEEKY_SETTING("QuadFocusVerticalAngleGain", quad_focus.vertical.angle_gain)
++CHEEKY_SETTING("QuadFocusVerticalDeadzone", quad_focus.vertical.deadzone)
+ CHEEKY_SETTING("PeripheralDlaa", peripheral_dlaa_enabled)
+ CHEEKY_SETTING("PeripheralDlaaScale", peripheral_dlaa_scale)
+ CHEEKY_SETTING("CenterPreset", center_preset)
+@@ -44,6 +60,10 @@ CHEEKY_SETTING("FixMotionBlur", fix_motion_blur)
+ CHEEKY_SETTING("RrCenterPreset", rr_center_preset)
+ CHEEKY_SETTING("RrPeripheralPreset", rr_peripheral_preset)
+ CHEEKY_SETTING("CenterSupersampling", center_supersampling)
++CHEEKY_SETTING("QuadAutomaticSr", quad_automatic_sr)
++CHEEKY_SETTING("QuadQualityTargetPercent", quad_quality_target_percent)
++CHEEKY_SETTING("QuadAutomaticNr", quad_automatic_nr)
++CHEEKY_SETTING("QuadNrTargetPercent", quad_nr_target_percent)
+ CHEEKY_SETTING("AfwManualCoverage", afw_manual_coverage)
+ CHEEKY_SETTING("AfwAutomaticCoverage", afw_automatic_coverage)
+ CHEEKY_SETTING("AfwWarpMargin", afw_warp_margin)
+diff --git a/uevr/settings_io.cpp b/uevr/settings_io.cpp
+index 0f49b91..749c724 100644
+--- a/uevr/settings_io.cpp
++++ b/uevr/settings_io.cpp
+@@ -88,7 +88,7 @@ bool set_named_setting(Settings& s, std::string_view key, std::string_view value
+         s.fg.release_point = hold ? 2U : 0U; return true;
+     }
+     if (key == "FgReleasePoint") {
+-        std::uint32_t point{}; if (!parse(value, point) || point > 8U) return false;
++        std::uint32_t point{}; if (!parse(value, point) || point > 9U) return false;
+         s.fg.release_point = point; return true;
+     }
+ #define CHEEKY_SETTING(name, field) if (key == name) return parse(value, s.field);
+@@ -97,6 +97,8 @@ bool set_named_setting(Settings& s, std::string_view key, std::string_view value
+     return false;
+ }
+ std::string_view setting_group(std::string_view key) {
++    if (key == "QuadAutomaticSr" || key == "QuadQualityTargetPercent") return "sr";
++    if (key == "QuadAutomaticNr" || key == "QuadNrTargetPercent") return "nr";
+     if(key.starts_with("Quad"))return "gaze";
+     if (key.starts_with("Fg")) return "fg";
+     if (key.starts_with("Nr")) return "nr";
+@@ -160,9 +162,7 @@ bool read_settings_file(const std::filesystem::path& path, Settings& s, std::str
+     candidate.quad_saved_roles={};candidate.quad_saved_source_count=0;
+     candidate.independent_openxr_gaze = false;
+     candidate.fix_motion_blur = false; // Compatibility copies are always opt-in.
+-    // Older files predate this additive key and use After, even when loaded
+-    // over a currently configured Before setting. Commit only after validation.
+-    candidate.nr_processing_order = NrProcessingOrder::after_upscaling;
++    candidate.nr_processing_order = Settings{}.nr_processing_order;
+     candidate.nr_style = 0U; // Older files used the hardcoded Standard style.
+     candidate.nr_universal = NrUniversalSettings{}; // Older files predate Universal DLSS 5.
+     candidate.afw_manual_coverage = false; // Older AFW builds used the centered safety region.
+@@ -176,6 +176,11 @@ bool read_settings_file(const std::filesystem::path& path, Settings& s, std::str
+         if (!section) continue;
+         const auto split = text.find('='); if (split == text.npos) continue;
+         const auto key = trim(text.substr(0, split)), value = trim(text.substr(split + 1));
++        if (key == "FgCenterMethod" && (value == "14" || value == "15")) {
++            // Keep the rest of an older profile when its experimental backend was retired.
++            candidate.fg.center_method = cheeky_fg_optical_flow;
++            continue;
++        }
+         if (key == "FgWaitForCompletion" && explicit_release_point) continue;
+         if (key == "FgReleasePoint") explicit_release_point = true;
+         if (key == "SchemaVersion") {

@@ -1,0 +1,57 @@
+diff --git a/OptiScaler/dlssnr/DlssNr_MenuControls.cpp b/OptiScaler/dlssnr/DlssNr_MenuControls.cpp
+index c29ae644..ee3fe520 100644
+--- a/OptiScaler/dlssnr/DlssNr_MenuControls.cpp
++++ b/OptiScaler/dlssnr/DlssNr_MenuControls.cpp
+@@ -56,8 +56,9 @@ static void ConstrainSpatialControls(Spatial::Settings& value, float scale)
+     const float minimumWork = Spatial::MinimumWorkPercent(scale);
+     auto axis = [&](float& center, float& work, float& offset)
+     {
+-        center = std::clamp(std::isfinite(center) ? center : 80.0f, 1.0f, 99.5f);
+-        work = std::clamp(std::isfinite(work) ? work : 90.0f, std::max(minimumWork, center + 0.5f), 100.0f);
++        center = std::clamp(std::isfinite(center) ? center : 80.0f, 1.0f, 100.0f);
++        work = std::clamp(std::isfinite(work) ? work : 90.0f,
++                          std::max(minimumWork, std::min(center + 0.5f, 100.0f)), 100.0f);
+         const float limit = Spatial::MaxCenterOffset(center);
+         offset = std::clamp(std::isfinite(offset) ? offset : 0.0f, -limit, limit);
+     };
+@@ -103,11 +104,11 @@ static void RenderSpatial(Config* config)
+         if (ImGui::IsItemDeactivatedAfterEdit())
+             commit = true;
+     };
+-    slider("Centre width", pending.centerX, 1.0f, pending.workX - 0.5f);
+-    slider("Centre height", pending.centerY, 1.0f, pending.workY - 0.5f);
++    slider("Centre width", pending.centerX, 1.0f, 100.0f);
++    slider("Centre height", pending.centerY, 1.0f, 100.0f);
+     const float minimumWork = Spatial::MinimumWorkPercent(scale);
+-    slider("Working width", pending.workX, std::max(minimumWork, pending.centerX + 0.5f), 100.0f);
+-    slider("Working height", pending.workY, std::max(minimumWork, pending.centerY + 0.5f), 100.0f);
++    slider("Working width", pending.workX, std::max(minimumWork, std::min(pending.centerX + 0.5f, 100.0f)), 100.0f);
++    slider("Working height", pending.workY, std::max(minimumWork, std::min(pending.centerY + 0.5f, 100.0f)), 100.0f);
+     const float xLimit = Spatial::MaxCenterOffset(pending.centerX);
+     const float yLimit = Spatial::MaxCenterOffset(pending.centerY);
+     slider("Centre horizontal offset", pending.offsetX, -xLimit, xLimit);
+diff --git a/OptiScaler/shaders/dlssnr/DlssNr_Spatial.h b/OptiScaler/shaders/dlssnr/DlssNr_Spatial.h
+index c70b933f..d7dc7704 100644
+--- a/OptiScaler/shaders/dlssnr/DlssNr_Spatial.h
++++ b/OptiScaler/shaders/dlssnr/DlssNr_Spatial.h
+@@ -135,7 +135,7 @@ inline Layout Build(const Settings& s, uint32_t nativeW, uint32_t nativeH, float
+     const auto validAxis = [](float center, float work, float offset, float shift)
+     {
+         if (!std::isfinite(center) || !std::isfinite(work) || !std::isfinite(offset) || !std::isfinite(shift) ||
+-            center <= 0 || work < 25 || work > 100 || center >= work ||
++            center <= 0 || work < 25 || work > 100 || center > work || (center == work && center != 100) ||
+             std::abs(offset) > MaxCenterOffset(center) + 1e-4f)
+             return false;
+         const auto limits = WorkShiftLimits(center, work, offset);
+@@ -150,8 +150,9 @@ inline Layout Build(const Settings& s, uint32_t nativeW, uint32_t nativeH, float
+     const uint32_t rawH = EvenExtent(nativeH, s.workY * .01);
+     const uint32_t modelW = EvenExtent(nativeW, static_cast<double>(globalScale) * s.workX * .01);
+     const uint32_t modelH = EvenExtent(nativeH, static_cast<double>(globalScale) * s.workY * .01);
+-    if (modelW < nativeW * .25f || modelH < nativeH * .25f || s.centerX * .01f >= static_cast<float>(rawW) / nativeW ||
+-        s.centerY * .01f >= static_cast<float>(rawH) / nativeH)
++    if (modelW < nativeW * .25f || modelH < nativeH * .25f ||
++        (s.centerX != 100 && s.centerX * .01f >= static_cast<float>(rawW) / nativeW) ||
++        (s.centerY != 100 && s.centerY * .01f >= static_cast<float>(rawH) / nativeH))
+     {
+         result.reason = "effective model extent below 25% or centre outside work";
+         return result;

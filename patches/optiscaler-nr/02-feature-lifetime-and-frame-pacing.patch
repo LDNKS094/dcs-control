@@ -1,0 +1,1042 @@
+diff --git a/OptiScaler/State.h b/OptiScaler/State.h
+index f8d3586c..f1b172b6 100644
+--- a/OptiScaler/State.h
++++ b/OptiScaler/State.h
+@@ -12,6 +12,7 @@
+ #include <mutex>
+ #include <atomic>
+ #include <sl_dlss_g.h>
++#include <framegen/dlssg/DlssgFrameRates.h>
+ #include <vulkan/vulkan.h>
+ #include <ankerl/unordered_dense.h>
+ 
+@@ -265,6 +266,9 @@ class State
+     bool dlssgGameDMFGSupported = false;
+     sl::DLSSGMode dlssgLastSetMode = sl::DLSSGMode::eOff;
+     int dlssgDetectedInterpolationCount = 0;
++    std::atomic<int> dlssgPresentedSinceLastPoll { -1 };
++    std::atomic<uint32_t> dlssgRuntimeStatus { 0 };
++    DlssgFrameRates dlssgFrameRates;
+ 
+     // DLSS
+     bool dlssPresetsOverriddenExternally = false;
+diff --git a/OptiScaler/framegen/IFGFeature.cpp b/OptiScaler/framegen/IFGFeature.cpp
+index 3cb12cff..e4f0c764 100644
+--- a/OptiScaler/framegen/IFGFeature.cpp
++++ b/OptiScaler/framegen/IFGFeature.cpp
+@@ -2,6 +2,8 @@
+ #include "IFGFeature.h"
+ #include <Config.h>
+ #include <low_latency/input/input_common.h>
++#include <hooks/Reflex_Hooks.h>
++#include <proxies/Streamline_Proxy.h>
+ 
+ int IFGFeature::GetIndex() { return (_frameCount % BUFFER_COUNT); }
+ 
+@@ -57,6 +59,24 @@ UINT64 IFGFeature::StartNewFrame()
+ 
+     NewFrame();
+ 
++    const auto& state = State::Instance();
++    if (state.activeFgInput == FGInput::Upscaler && state.activeFgOutput == FGOutput::DLSSG &&
++        IsActive() && !IsPaused() &&
++        (!ReflexHooks::gameIsSendingMarkers() || !Config::Instance()->FGDLSSGUseGamesReflexMarkers.value_or_default()))
++    {
++        // The upscaler input establishes the frame ID shared by resources and Present markers.
++        const auto frameId = static_cast<uint32_t>(_frameCount);
++        sl::FrameToken* token = nullptr;
++        auto result = StreamlineProxy::GetNewFrameToken()(token, &frameId);
++        if (result == sl::Result::eOk)
++        {
++            ScopedOptiScalerReflex optiScalerCall {};
++            result = StreamlineProxy::PCLSetMarker()(sl::PCLMarker::eSimulationStart, *token);
++        }
++        if (result != sl::Result::eOk)
++            LOG_ERROR("Fallback SimulationStart failed for frame {}: {}", frameId, static_cast<int>(result));
++    }
++
+     return _frameCount;
+ }
+ 
+diff --git a/OptiScaler/framegen/dlssg/DLSSG_Dx12.cpp b/OptiScaler/framegen/dlssg/DLSSG_Dx12.cpp
+index ec76d544..393428ce 100644
+--- a/OptiScaler/framegen/dlssg/DLSSG_Dx12.cpp
++++ b/OptiScaler/framegen/dlssg/DLSSG_Dx12.cpp
+@@ -19,6 +19,7 @@
+ #include <magic_enum.hpp>
+ 
+ #include <DirectXMath.h>
++#include <misc/LifecycleAdapterV1.h>
+ 
+ using namespace DirectX;
+ 
+@@ -291,6 +292,25 @@ void DLSSG_Dx12::Activate()
+ 
+     if (!_isActive)
+     {
++        // PresentStart precedes Dispatch, so Reflex must already be enabled on the first active frame.
++        sl::ReflexOptions reflexConst = {};
++        reflexConst.mode = sl::ReflexMode::eLowLatency;
++        reflexConst.useMarkersToOptimize = ReflexHooks::gameIsSendingMarkers();
++
++        if (State::Instance().activeFgInput == FGInput::Upscaler &&
++            State::Instance().activeFgNvngx == FGNvngxReplacement::None)
++        {
++            const auto fpsLimit = Config::Instance()->FramerateLimit.value_or_default();
++            reflexConst.frameLimitUs = fpsLimit > 0.0f ? static_cast<uint32_t>(std::round(1'000'000 / fpsLimit)) : 0;
++        }
++
++        ScopedOptiScalerReflex optiScalerCall {};
++        auto reflexSetOptionsResult = StreamlineProxy::ReflexSetOptions()(reflexConst);
++
++        if (reflexSetOptionsResult != sl::Result::eOk)
++        {
++            LOG_ERROR("Couldn't set Reflex options, error: {}", magic_enum::enum_name(reflexSetOptionsResult));
++        }
+ 
+         UpdateTarget();
+         _isActive = true;
+@@ -311,6 +331,7 @@ void DLSSG_Dx12::Deactivate()
+         sl::ReflexOptions reflexConst = {};
+         reflexConst.mode = sl::ReflexMode::eOff;
+         reflexConst.useMarkersToOptimize = false;
++        ScopedOptiScalerReflex optiScalerCall {};
+         StreamlineProxy::ReflexSetOptions()(reflexConst);
+ 
+         _isActive = false;
+@@ -398,6 +419,13 @@ bool DLSSG_Dx12::Dispatch()
+     reflexConst.mode = sl::ReflexMode::eLowLatency;
+     reflexConst.useMarkersToOptimize = ReflexHooks::gameIsSendingMarkers();
+ 
++    if (state.activeFgInput == FGInput::Upscaler && state.activeFgNvngx == FGNvngxReplacement::None)
++    {
++        const auto fpsLimit = Config::Instance()->FramerateLimit.value_or_default();
++        reflexConst.frameLimitUs = fpsLimit > 0.0f ? static_cast<uint32_t>(std::round(1'000'000 / fpsLimit)) : 0;
++    }
++
++    ScopedOptiScalerReflex optiScalerCall {};
+     auto reflexSetOptionsResult = StreamlineProxy::ReflexSetOptions()(reflexConst);
+ 
+     if (reflexSetOptionsResult != sl::Result::eOk)
+@@ -607,7 +635,7 @@ void DLSSG_Dx12::EvaluateState(ID3D12Device* device, FG_Constants& fgConstants)
+     _constants = fgConstants;
+ 
+     // If FG Enabled from menu
+-    if (Config::Instance()->FGEnabled.value_or_default())
++    if (Config::Instance()->FGEnabled.value_or_default() && !LifecycleAdapterV1::FrameGenerationPaused())
+     {
+         if (_device == nullptr)
+         {
+@@ -628,7 +656,9 @@ void DLSSG_Dx12::EvaluateState(ID3D12Device* device, FG_Constants& fgConstants)
+     }
+     else
+     {
+-        LOG_DEBUG("!FGEnabled");
++        LOG_DEBUG("FG disabled or adapter pause");
++        if (_isActive && LifecycleAdapterV1::FrameGenerationPaused())
++            LOG_INFO("Lifecycle adapter paused frame generation");
+         Deactivate();
+ 
+         state.clearCapturedHudlesses = true;
+diff --git a/OptiScaler/framegen/dlssg/DlssgFrameRates.h b/OptiScaler/framegen/dlssg/DlssgFrameRates.h
+new file mode 100644
+index 00000000..1cf03b5b
+--- /dev/null
++++ b/OptiScaler/framegen/dlssg/DlssgFrameRates.h
+@@ -0,0 +1,48 @@
++#pragma once
++#include <cstdint>
++#include <mutex>
++
++// Counts app presents and Streamline presentations over the same elapsed window.
++class DlssgFrameRates
++{
++  public:
++    struct Snapshot { double app = -1.0; double presented = -1.0; };
++
++    void Record(double nowMs, const void* swapchain, bool active, bool valid, uint32_t presented)
++    {
++        std::lock_guard<std::mutex> lock(_mutex);
++        if (!_started || _swapchain != swapchain || _active != active || !valid)
++        {
++            _started = valid;
++            _swapchain = swapchain;
++            _active = active;
++            _startMs = nowMs;
++            _appCount = _presentedCount = 0;
++            _snapshot = {};
++            return;
++        }
++        ++_appCount;
++        _presentedCount += presented;
++        const double seconds = (nowMs - _startMs) / 1000.0;
++        if (seconds >= 1.0)
++        {
++            _snapshot = { _appCount / seconds, _presentedCount / seconds };
++            _startMs = nowMs;
++            _appCount = _presentedCount = 0;
++        }
++    }
++
++    Snapshot Read()
++    {
++        std::lock_guard<std::mutex> lock(_mutex);
++        return _snapshot;
++    }
++
++  private:
++    std::mutex _mutex;
++    const void* _swapchain = nullptr;
++    bool _started = false, _active = false;
++    double _startMs = 0.0;
++    uint64_t _appCount = 0, _presentedCount = 0;
++    Snapshot _snapshot;
++};
+diff --git a/OptiScaler/hooks/FG_Hooks.cpp b/OptiScaler/hooks/FG_Hooks.cpp
+index b700bd83..1535edde 100644
+--- a/OptiScaler/hooks/FG_Hooks.cpp
++++ b/OptiScaler/hooks/FG_Hooks.cpp
+@@ -16,6 +16,7 @@
+ #include <misc/FrameLimit.h>
+ 
+ #include <misc/IdentifyGpu.h>
++#include <misc/LifecycleAdapterV1.h>
+ #include <hooks/Reflex_Hooks.h>
+ #include <menu/menu_overlay_dx.h>
+ 
+@@ -1219,9 +1220,13 @@ HRESULT FGHooks::FGPresent(IDXGISwapChain* This, UINT SyncInterval, UINT Flags,
+         }
+     }
+ 
++    // Loading can continue presenting without another Evaluate. Serialize the actual FG deactivation
++    // before the active-state snapshot and Reflex/FG markers, even when the optional present mutex is off.
++    const bool frameGenerationPaused = state.activeFgOutput == FGOutput::DLSSG && LifecycleAdapterV1::FrameGenerationPaused();
+     bool mutexUsed = false;
+-    if (willPresent && fg != nullptr && fg->IsActive() && !fg->IsPaused() &&
+-        config->FGUseMutexForSwapchain.value_or_default() && fg->Mutex.getOwner() != 2)
++    if (willPresent && fg != nullptr && fg->IsActive() &&
++        (frameGenerationPaused || (!fg->IsPaused() && config->FGUseMutexForSwapchain.value_or_default())) &&
++        fg->Mutex.getOwner() != 2)
+     {
+         LOG_TRACE("Waiting FG->Mutex 2, current: {}", fg->Mutex.getOwner());
+         fg->Mutex.lock(2);
+@@ -1229,6 +1234,13 @@ HRESULT FGHooks::FGPresent(IDXGISwapChain* This, UINT SyncInterval, UINT Flags,
+         LOG_TRACE("Accuired FG->Mutex: {}", fg->Mutex.getOwner());
+     }
+ 
++    if (willPresent && frameGenerationPaused && fg != nullptr && fg->IsActive())
++    {
++        fg->Deactivate();
++        state.clearCapturedHudlesses = true;
++        LOG_INFO("Lifecycle adapter paused frame generation");
++    }
++
+     const bool fgFeatureActive = fg != nullptr && fg->IsActive() && !fg->IsPaused();
+ 
+     sl::FrameToken* localToken = nullptr;
+@@ -1247,7 +1259,10 @@ HRESULT FGHooks::FGPresent(IDXGISwapChain* This, UINT SyncInterval, UINT Flags,
+                 tokenResult = StreamlineProxy::GetNewFrameToken()(localToken, &frameId);
+ 
+                 if (tokenResult == sl::Result::eOk)
++                {
++                    ScopedOptiScalerReflex optiScalerCall {};
+                     StreamlineProxy::PCLSetMarker()(sl::PCLMarker::ePresentStart, *localToken);
++                }
+             }
+         }
+     }
+@@ -1333,10 +1348,36 @@ HRESULT FGHooks::FGPresent(IDXGISwapChain* This, UINT SyncInterval, UINT Flags,
+             Util::GetDeviceRemovedReason(state.currentD3D12Device);
+     }
+ 
++    if (willPresent && state.activeFgOutput == FGOutput::DLSSG && fg != nullptr)
++    {
++        // Query on the presenting thread; the menu only reads this snapshot.
++        sl::DLSSGState dlssgState {};
++        const auto stateResult = StreamlineProxy::DLSSGGetState()(sl::ViewportHandle { 0 }, dlssgState, nullptr);
++        if (state.activeFgInput == FGInput::Upscaler)
++            state.dlssgFrameRates.Record(Util::MillisecondsNow(), This, fgFeatureActive,
++                                        stateResult == sl::Result::eOk && result == S_OK,
++                                        dlssgState.numFramesActuallyPresented);
++        if (stateResult == sl::Result::eOk)
++        {
++            const auto status = static_cast<uint32_t>(dlssgState.status);
++            const auto previousStatus = state.dlssgRuntimeStatus.exchange(status);
++            const auto previousCount = state.dlssgPresentedSinceLastPoll.exchange(
++                static_cast<int>(dlssgState.numFramesActuallyPresented));
++            if (previousCount < 0 || previousStatus != status)
++                LOG_INFO("DLSSG runtime status: {:X}, presented since last poll: {}", status,
++                         dlssgState.numFramesActuallyPresented);
++        }
++        else if (state.dlssgPresentedSinceLastPoll.exchange(-1) >= 0)
++        {
++            LOG_WARN("Couldn't query DLSSG state, error: {}", magic_enum::enum_name(stateResult));
++        }
++    }
++
+     if (tokenResult == sl::Result::eOk && localToken != nullptr && fgFeatureActive &&
+         (!ReflexHooks::gameIsSendingMarkers() || !config->FGDLSSGUseGamesReflexMarkers.value_or_default()) &&
+         willPresent && state.activeFgOutput == FGOutput::DLSSG)
+     {
++        ScopedOptiScalerReflex optiScalerCall {};
+         if (StreamlineProxy::PCLSetMarker() != nullptr)
+             StreamlineProxy::PCLSetMarker()(sl::PCLMarker::ePresentEnd, *localToken);
+ 
+diff --git a/OptiScaler/hooks/Reflex_Hooks.cpp b/OptiScaler/hooks/Reflex_Hooks.cpp
+index 4aaefbb5..6cc8a59f 100644
+--- a/OptiScaler/hooks/Reflex_Hooks.cpp
++++ b/OptiScaler/hooks/Reflex_Hooks.cpp
+@@ -28,6 +28,9 @@ NvAPI_Status ReflexHooks::hkNvAPI_D3D_SetSleepMode(IUnknown* pDev, NV_SET_SLEEP_
+     memcpy(&_lastSleepParams, pSetSleepModeParams, sizeof(NV_SET_SLEEP_MODE_PARAMS));
+     _lastSleepDev = pDev;
+ 
++    if (ScopedOptiScalerReflex::IsActive())
++        return o_NvAPI_D3D_SetSleepMode(pDev, pSetSleepModeParams);
++
+     if (State::Instance().gameQuirks & GameQuirk::HitmanReflexHacks)
+         _lastSetSleepThread = std::this_thread::get_id();
+ 
+@@ -42,35 +45,30 @@ NvAPI_Status ReflexHooks::hkNvAPI_D3D_SetSleepMode(IUnknown* pDev, NV_SET_SLEEP_
+ 
+ NvAPI_Status ReflexHooks::hkNvAPI_D3D_Sleep(IUnknown* pDev)
+ {
++    if (ScopedOptiScalerReflex::IsActive())
++    {
++        _lastSleepDev = pDev;
++        return o_NvAPI_D3D_Sleep(pDev);
++    }
+ #ifdef LOG_REFLEX_CALLS
+     LOG_FUNC();
+ #endif
+ 
+-    static bool skip = false;
+     if (State::Instance().activeFgOutput == FGOutput::DLSSG &&
+         Config::Instance()->FGDLSSGUseGamesReflexMarkers.value_or_default() && State::Instance().currentFG &&
+         State::Instance().currentFG->IsActive() && !State::Instance().currentFG->IsPaused())
+     {
+-        if (!skip)
+-        {
+-            uint32_t frameCount = (uint32_t) _lastFrameId[SIMULATION_START] + 1;
++        uint32_t frameCount = (uint32_t) _lastFrameId[SIMULATION_START] + 1;
+ 
+-            sl::FrameToken* frameToken;
+-            StreamlineProxy::GetNewFrameToken()(frameToken, &frameCount);
++        sl::FrameToken* frameToken;
++        StreamlineProxy::GetNewFrameToken()(frameToken, &frameCount);
+ 
+-            LOG_TRACE("Sleep for frame {}", frameCount);
++        LOG_TRACE("Sleep for frame {}", frameCount);
+ 
+-            skip = true;
+-            StreamlineProxy::ReflexSleep()(*frameToken);
+-            skip = false;
++        ScopedOptiScalerReflex optiScalerCall {};
++        StreamlineProxy::ReflexSleep()(*frameToken);
+ 
+-            return NVAPI_OK;
+-        }
+-        else
+-        {
+-            _lastSleepDev = pDev;
+-            return o_NvAPI_D3D_Sleep(pDev);
+-        }
++        return NVAPI_OK;
+     }
+ 
+     if (State::Instance().activeFgOutput == FGOutput::XeFG)
+@@ -95,6 +93,11 @@ NvAPI_Status ReflexHooks::hkNvAPI_D3D_GetLatency(IUnknown* pDev, NV_LATENCY_RESU
+ NvAPI_Status ReflexHooks::hkNvAPI_D3D_SetLatencyMarker(IUnknown* pDev,
+                                                        NV_LATENCY_MARKER_PARAMS* pSetLatencyMarkerParams)
+ {
++    if (ScopedOptiScalerReflex::IsActive())
++    {
++        _updatesWithoutMarker = 0;
++        return o_NvAPI_D3D_SetLatencyMarker(pDev, pSetLatencyMarkerParams);
++    }
+ #ifdef LOG_REFLEX_CALLS
+     LOG_FUNC();
+ #endif
+@@ -132,8 +135,6 @@ NvAPI_Status ReflexHooks::hkNvAPI_D3D_SetLatencyMarker(IUnknown* pDev,
+     _lastFrameId[pSetLatencyMarkerParams->markerType] = pSetLatencyMarkerParams->frameID;
+     _lastDev[pSetLatencyMarkerParams->markerType] = pDev;
+ 
+-    static bool skip[20] = {};
+-
+     if (pSetLatencyMarkerParams->markerType == SIMULATION_START)
+         _lastMarkerFrame = State::Instance().fgLastFrame;
+ 
+@@ -202,9 +203,7 @@ NvAPI_Status ReflexHooks::hkNvAPI_D3D_SetLatencyMarker(IUnknown* pDev,
+             noMarker = true;
+         }
+ 
+-        auto index = (UINT) marker;
+-
+-        if (!noMarker && !skip[index])
++        if (!noMarker)
+         {
+             if (pSetLatencyMarkerParams->markerType == PRESENT_START && State::Instance().currentFG != nullptr)
+             {
+@@ -224,19 +223,12 @@ NvAPI_Status ReflexHooks::hkNvAPI_D3D_SetLatencyMarker(IUnknown* pDev,
+ 
+             LOG_TRACE("{} for frame {}", magic_enum::enum_name(marker), frameCount);
+ 
+-            skip[index] = true;
++            ScopedOptiScalerReflex optiScalerCall {};
+             StreamlineProxy::PCLSetMarker()(marker, *frameToken);
+-            skip[index] = false;
+ 
+             return NvAPI_Status::NVAPI_OK;
+         }
+-        else
+-        {
+-            if (noMarker)
+-                return NVAPI_OK;
+-            else
+-                return o_NvAPI_D3D_SetLatencyMarker(pDev, pSetLatencyMarkerParams);
+-        }
++        return NVAPI_OK;
+     }
+ 
+     if (State::Instance().gameQuirks & GameQuirk::HitmanReflexHacks)
+@@ -566,6 +558,16 @@ void ReflexHooks::update(bool fgActive, bool isVulkan)
+ 
+     State::Instance().reflexShowWarning = false;
+ 
++    const auto& state = State::Instance();
++    if (!isVulkan && fgActive && state.activeFgInput == FGInput::Upscaler &&
++        state.activeFgOutput == FGOutput::DLSSG && state.activeFgNvngx == FGNvngxReplacement::None)
++    {
++        // This output submits its FPS cap through slReflexSetOptions.
++        State::Instance().reflexLimitsFps = _inited && _updatesWithoutMarker <= 20 &&
++                                          _lastSleepDev != nullptr && _lastSleepParams.bLowLatencyMode;
++        return;
++    }
++
+     if (_updatesWithoutMarker > 20 || !_inited)
+     {
+         State::Instance().reflexLimitsFps = false;
+diff --git a/OptiScaler/hooks/Reflex_Hooks.h b/OptiScaler/hooks/Reflex_Hooks.h
+index d3aefdf0..5a3ab47b 100644
+--- a/OptiScaler/hooks/Reflex_Hooks.h
++++ b/OptiScaler/hooks/Reflex_Hooks.h
+@@ -5,6 +5,18 @@
+ #include "Hook_Utils.h"
+ #include "low_latency/ll_util.h"
+ 
++class ScopedOptiScalerReflex
++{
++    inline static thread_local unsigned int _depth = 0;
++
++  public:
++    ScopedOptiScalerReflex() { ++_depth; }
++    ~ScopedOptiScalerReflex() { --_depth; }
++    ScopedOptiScalerReflex(const ScopedOptiScalerReflex&) = delete;
++    ScopedOptiScalerReflex& operator=(const ScopedOptiScalerReflex&) = delete;
++    static bool IsActive() { return _depth != 0; }
++};
++
+ enum TimingType : uint32_t
+ {
+     TimeRange, // in ns, value stored in length
+diff --git a/OptiScaler/inputs/NVNGX_DLSS_Dx11.cpp b/OptiScaler/inputs/NVNGX_DLSS_Dx11.cpp
+index 4ac856a3..c13ff284 100644
+--- a/OptiScaler/inputs/NVNGX_DLSS_Dx11.cpp
++++ b/OptiScaler/inputs/NVNGX_DLSS_Dx11.cpp
+@@ -5,6 +5,7 @@
+ 
+ #include <upscalers/IFeature_Dx11.h>
+ #include <upscalers/FeatureProvider_Dx11.h>
++#include <upscalers/dlss/DLSSFeature_Dx11On12.h>
+ 
+ #include "NVNGX_DLSS.h"
+ #include "NVNGX_Parameter.h"
+@@ -17,10 +18,51 @@
+ #include <ankerl/unordered_dense.h>
+ #include <imgui/ImGuiNotify.hpp>
+ #include <misc/IdentifyGpu.h>
++#include <misc/LifecycleAdapterV1.h>
++#include <unordered_set>
+ 
+ static ID3D11Device* D3D11Device = nullptr;
+ // Leftover bridge/GPU owners must not run destructors under the loader lock.
+ static auto& Dx11Contexts = *new ankerl::unordered_dense::map<unsigned int, ContextData<IFeature_Dx11>>;
++// Registration enumerates the same contexts that NGX calls mutate. Callbacks can enqueue requests
++// under this lock, and Shutdown1 calls Shutdown, so both paths require recursive entry.
++static std::recursive_mutex contextMutex;
++static OptiScalerLifecycleCallbackV2 lifecycleCallback = nullptr;
++static std::unordered_set<unsigned int> pendingReleases;
++
++static void NotifyLifecycle(uint32_t event, uint32_t handle)
++{
++    if (lifecycleCallback)
++        lifecycleCallback(event, handle);
++}
++
++extern "C" __declspec(dllexport) uint32_t OptiScaler_RegisterReleaseLifecycleV2(OptiScalerLifecycleCallbackV2 callback)
++{
++    std::lock_guard lock(contextMutex);
++    lifecycleCallback = callback;
++    if (callback)
++        for (const auto& [id, context] : Dx11Contexts)
++            callback(OptiScalerLifecycleCreatedV1, id);
++    return 1;
++}
++
++extern "C" __declspec(dllexport) uint32_t OptiScaler_RequestReleaseV2(uint64_t handle)
++{
++    std::lock_guard lock(contextMutex);
++    const auto id = static_cast<unsigned int>(handle);
++    const auto it = Dx11Contexts.find(id);
++    if (it == Dx11Contexts.end() || !dynamic_cast<DLSSFeatureDx11on12*>(it->second.feature.get()) ||
++        !it->second.feature->IsInited())
++        return 0;
++    pendingReleases.insert(id);
++    return 1;
++}
++
++extern "C" __declspec(dllexport) void OptiScaler_SetFrameGenerationPausedV1(bool paused)
++{
++    LifecycleAdapterV1::frameGenerationPaused.store(paused, std::memory_order_release);
++}
++
+ static int evalCounter = 0;
+ static bool shutdown = false;
+ static bool _skipInit = false;
+@@ -326,17 +368,23 @@ NVSDK_NGX_API NVSDK_NGX_Result NVSDK_NGX_D3D11_Shutdown()
+ {
+     if (State::Instance().isShuttingDown)
+         return NVSDK_NGX_Result_Success;
++    std::lock_guard lock(contextMutex);
+     shutdown = true;
+ 
+     State::Instance().currentFeature = nullptr;
+     // DX11-on-DX12 features own their NR shaders through the shared DX12 feature.
++    for (const auto& [id, context] : Dx11Contexts)
++        NotifyLifecycle(OptiScalerLifecycleReleasedV1, id);
+     Dx11Contexts.clear();
++    pendingReleases.clear();
+     D3D11Device = nullptr;
+ 
+     if (Config::Instance()->DLSSEnabled.value_or_default() && NVNGXProxy::IsDx11Inited() &&
+         NVNGXProxy::D3D11_Shutdown() != nullptr)
+     {
++        LOG_INFO("Calling driver D3D11 Shutdown, retained contexts: {}", Dx11Contexts.size());
+         auto result = NVNGXProxy::D3D11_Shutdown()();
++        LOG_INFO("Driver D3D11 Shutdown returned: {:X}", (UINT) result);
+         NVNGXProxy::SetDx11Inited(false);
+     }
+ 
+@@ -349,6 +397,7 @@ NVSDK_NGX_API NVSDK_NGX_Result NVSDK_NGX_D3D11_Shutdown()
+ 
+     UpscalerInputsDx11wDx12::Reset();
+     Dx11WithDx12::ResetUpscalerResourceCache(true);
++    LOG_INFO("D3D11 NGX shutdown cleanup complete");
+ 
+     return NVSDK_NGX_Result_Success;
+ }
+@@ -357,14 +406,20 @@ NVSDK_NGX_API NVSDK_NGX_Result NVSDK_NGX_D3D11_Shutdown1(ID3D11Device* InDevice)
+ {
+     if (State::Instance().isShuttingDown)
+         return NVSDK_NGX_Result_Success;
++    std::lock_guard lock(contextMutex);
+     shutdown = true;
+     State::Instance().currentFeature = nullptr;
++    for (const auto& [id, context] : Dx11Contexts)
++        NotifyLifecycle(OptiScalerLifecycleReleasedV1, id);
+     Dx11Contexts.clear();
++    pendingReleases.clear();
+ 
+     if (Config::Instance()->DLSSEnabled.value_or_default() && NVNGXProxy::IsDx11Inited() &&
+         NVNGXProxy::D3D11_Shutdown1() != nullptr)
+     {
++        LOG_INFO("Calling driver D3D11 Shutdown1, retained contexts: {}", Dx11Contexts.size());
+         auto result = NVNGXProxy::D3D11_Shutdown1()(InDevice);
++        LOG_INFO("Driver D3D11 Shutdown1 returned: {:X}", (UINT) result);
+         NVNGXProxy::SetDx11Inited(false);
+     }
+ 
+@@ -527,6 +582,7 @@ NVSDK_NGX_API NVSDK_NGX_Result NVSDK_NGX_D3D11_CreateFeature(ID3D11DeviceContext
+                                                              NVSDK_NGX_Parameter* InParameters,
+                                                              NVSDK_NGX_Handle** OutHandle)
+ {
++    std::lock_guard lock(contextMutex);
+     // FeatureId check
+     if (InFeatureID != NVSDK_NGX_Feature_SuperSampling && InFeatureID != NVSDK_NGX_Feature_RayReconstruction)
+     {
+@@ -603,6 +659,7 @@ NVSDK_NGX_API NVSDK_NGX_Result NVSDK_NGX_D3D11_CreateFeature(ID3D11DeviceContext
+ 
+     if (deviceContext->ModuleLoaded() && deviceContext->Init(D3D11Device, InDevCtx, InParameters))
+     {
++        NotifyLifecycle(OptiScalerLifecycleCreatedV1, handleId);
+         State::Instance().currentFeature = deviceContext;
+         UpscalerInputsDx11wDx12::Reset();
+         return NVSDK_NGX_Result_Success;
+@@ -612,16 +669,53 @@ NVSDK_NGX_API NVSDK_NGX_Result NVSDK_NGX_D3D11_CreateFeature(ID3D11DeviceContext
+ 
+     State::Instance().newBackend = Upscaler::FSR22;
+     State::Instance().changeBackend[handleId] = true;
++    NotifyLifecycle(OptiScalerLifecycleCreatedV1, handleId);
+ 
+     return NVSDK_NGX_Result_Success;
+ }
+ 
++static void RemoveModFeature(unsigned int handleId)
++{
++    const auto it = Dx11Contexts.find(handleId);
++    if (it->second.feature.get() == State::Instance().currentFeature)
++        State::Instance().currentFeature = nullptr;
++    Dx11Contexts.erase(it);
++    pendingReleases.erase(handleId);
++    NotifyLifecycle(OptiScalerLifecycleReleasedV1, handleId);
++}
++
++static void ApplyReleaseRequests(unsigned int currentHandle)
++{
++    auto releases = std::move(pendingReleases);
++    pendingReleases.clear();
++    for (const auto id : releases)
++    {
++        if (id == currentHandle)
++            continue;
++        const auto it = Dx11Contexts.find(id);
++        if (it == Dx11Contexts.end())
++            continue;
++        // The new scene owns the current FG inputs. Drain and remove only the old bridge.
++        auto* bridge = dynamic_cast<DLSSFeatureDx11on12*>(it->second.feature.get());
++        if (bridge && bridge->IsInited() && bridge->PrepareForRelease())
++        {
++            LOG_INFO("Feature lifecycle: released handle {}", id);
++            RemoveModFeature(id);
++        }
++        else
++        {
++            LOG_ERROR("Feature lifecycle: failed to release handle {}", id);
++        }
++    }
++}
++
+ NVSDK_NGX_API NVSDK_NGX_Result NVSDK_NGX_D3D11_ReleaseFeature(NVSDK_NGX_Handle* InHandle)
+ {
+     if (State::Instance().isShuttingDown)
+         return NVSDK_NGX_Result_Success;
+     if (!InHandle)
+         return NVSDK_NGX_Result_Success;
++    std::lock_guard lock(contextMutex);
+ 
+     auto handleId = InHandle->Id;
+     if (handleId < DLSS_MOD_ID_OFFSET)
+@@ -641,32 +735,39 @@ NVSDK_NGX_API NVSDK_NGX_Result NVSDK_NGX_D3D11_ReleaseFeature(NVSDK_NGX_Handle*
+         }
+     }
+ 
+-    if (State::Instance().currentFG != nullptr && State::Instance().activeFgInput == FGInput::Upscaler)
++    const auto context = Dx11Contexts.find(handleId);
++    if (context == Dx11Contexts.end())
++        return NVSDK_NGX_Result_Success;
++
++    auto* feature = context->second.feature.get();
++    auto* bridge = dynamic_cast<DLSSFeatureDx11on12*>(feature);
++    const bool retireBridge = bridge != nullptr && bridge->IsInited();
++    if (retireBridge && !bridge->PrepareForRelease())
++        return NVSDK_NGX_Result_Fail;
++
++    auto& state = State::Instance();
++    // An old bridge does not own the shared inputs of the selected upscaler.
++    if ((!retireBridge || feature == state.currentFeature) && state.currentFG != nullptr &&
++        state.activeFgInput == FGInput::Upscaler)
+     {
+-        State::Instance().fgChanged = true;
+-        State::Instance().currentFG->DestroyFGContext();
+-        State::Instance().clearCapturedHudlesses = true;
++        state.fgChanged = true;
++        state.currentFG->DestroyFGContext();
++        state.clearCapturedHudlesses = true;
+         UpscalerInputsDx11wDx12::Reset();
+     }
+ 
+     if (!shutdown)
+         LOG_INFO("releasing feature with id {0}", handleId);
+ 
+-    if (auto deviceContext = Dx11Contexts[handleId].feature.get(); deviceContext != nullptr)
++    if (feature != nullptr)
+     {
+-        if (!shutdown)
++        if (!retireBridge && !shutdown)
+         {
+             LOG_TRACE("sleeping for 500ms before reset()!");
+             std::this_thread::sleep_for(std::chrono::milliseconds(500));
+         }
+ 
+-        if (deviceContext == State::Instance().currentFeature)
+-            State::Instance().currentFeature = nullptr;
+-
+-        Dx11Contexts[handleId].feature.reset();
+-        auto it = std::find_if(Dx11Contexts.begin(), Dx11Contexts.end(),
+-                               [&handleId](const auto& p) { return p.first == handleId; });
+-        Dx11Contexts.erase(it);
++        RemoveModFeature(handleId);
+ 
+         if (!shutdown && Config::Instance()->Dx11DelayedInit.value_or_default())
+         {
+@@ -718,6 +819,7 @@ NVSDK_NGX_API NVSDK_NGX_Result NVSDK_NGX_D3D11_EvaluateFeature(ID3D11DeviceConte
+                                                                NVSDK_NGX_Parameter* InParameters,
+                                                                PFN_NVSDK_NGX_ProgressCallback InCallback)
+ {
++    std::lock_guard lock(contextMutex);
+     if (InFeatureHandle == nullptr)
+     {
+         LOG_DEBUG("InFeatureHandle is null");
+@@ -759,7 +861,13 @@ NVSDK_NGX_API NVSDK_NGX_Result NVSDK_NGX_D3D11_EvaluateFeature(ID3D11DeviceConte
+         LOG_INFO("callback exist");
+ 
+     IFeature_Dx11* deviceContext = nullptr;
+-    auto activeContext = &Dx11Contexts[handleId];
++    const auto context = Dx11Contexts.find(handleId);
++    if (context == Dx11Contexts.end())
++    {
++        LOG_DEBUG("trying to use released handle, returning NVSDK_NGX_Result_Success");
++        return NVSDK_NGX_Result_Success;
++    }
++    auto activeContext = &context->second;
+ 
+     if (state.changeBackend[handleId])
+     {
+@@ -825,6 +933,13 @@ NVSDK_NGX_API NVSDK_NGX_Result NVSDK_NGX_D3D11_EvaluateFeature(ID3D11DeviceConte
+     if (suppressDx11HudfixTracking)
+         Hudfix_Dx11::SetSkipStatus(false);
+ 
++    if (upscaleResult)
++    {
++        NotifyLifecycle(OptiScalerLifecycleEvaluatedV1, handleId);
++        if (!pendingReleases.empty())
++            ApplyReleaseRequests(handleId);
++    }
++
+     auto upscaler = deviceContext->GetUpscalerType();
+     if (!upscaleResult && !deviceContext->IsInited() &&
+         (upscaler == Upscaler::XeSS || upscaler == Upscaler::XeSS_on12 || upscaler == Upscaler::DLSS ||
+diff --git a/OptiScaler/menu/menu_common.cpp b/OptiScaler/menu/menu_common.cpp
+index e623ca05..3365923a 100644
+--- a/OptiScaler/menu/menu_common.cpp
++++ b/OptiScaler/menu/menu_common.cpp
+@@ -2009,7 +2009,24 @@ void MenuCommon::RenderPerformanceOverlay(RenderMenuContext& ctx)
+             }
+             else if (state.activeFgOutput == FGOutput::DLSSG && fg)
+             {
+-                fgText = formatFg("DLSSG", fg->GetMaxInterpolationCount());
++                if (state.activeFgInput == FGInput::Upscaler)
++                {
++                    // The upscaler output uses Streamline, not the NGX FG input counter.
++                    const auto presented = state.dlssgPresentedSinceLastPoll.load();
++                    const auto runtimeStatus = state.dlssgRuntimeStatus.load();
++                    if (!config->FGEnabled.value_or_default())
++                        fgText = " (DLSSG off)";
++                    else if (!fg->IsActive() || fg->IsPaused())
++                        fgText = " (DLSSG waiting)";
++                    else if (presented < 0)
++                        fgText = " (DLSSG unknown)";
++                    else if (runtimeStatus != 0)
++                        fgText = std::format(" (DLSSG error 0x{:X})", runtimeStatus);
++                    else
++                        fgText = " (DLSSG on, runtime ready)";
++                }
++                else
++                    fgText = formatFg("DLSSG", fg->GetMaxInterpolationCount());
+             }
+ 
+             const auto overlayType = config->FpsOverlayType.value_or_default();
+@@ -2029,7 +2046,15 @@ void MenuCommon::RenderPerformanceOverlay(RenderMenuContext& ctx)
+                                      usesDx12CompatLayer ? " w/Dx12" : "");
+             }
+ 
+-            if (fg != nullptr && fg->IsActive() && !fg->IsPaused())
++            if (state.activeFgInput == FGInput::Upscaler && state.activeFgOutput == FGOutput::DLSSG && fg)
++            {
++                const auto rates = state.dlssgFrameRates.Read();
++                if (rates.app < 0 || rates.presented < 0)
++                    fpsPart = "SL presented FPS: -- | App FPS: --";
++                else
++                    fpsPart = StrFmt("SL presented FPS: %6.1f | App FPS: %6.1f", rates.presented, rates.app);
++            }
++            else if (fg != nullptr && fg->IsActive() && !fg->IsPaused())
+             {
+                 const double baseFps = frameRate / (double) (fg->GetInterpolatedFrameCount() + 1);
+ 
+@@ -4395,20 +4420,40 @@ void MenuCommon::RenderFrameGenerationRuntimeSettings(RenderMenuContext& ctx)
+ 
+         ImGui::Text("Current DLSSG state:");
+         ImGui::SameLine();
+-        if (auto count = state.dlssgDetectedInterpolationCount; count > 0)
++        const auto presented = state.dlssgPresentedSinceLastPoll.load();
++        const auto runtimeStatus = state.dlssgRuntimeStatus.load();
++        if (!config->FGEnabled.value_or_default())
++        {
++            ImGui::TextColored(toneMapColor(ImVec4(1.f, 0.f, 0.f, 1.f)), "OFF");
++        }
++        else if (!fgOutput->IsActive() || fgOutput->IsPaused())
++        {
++            ImGui::TextUnformatted("WAITING");
++        }
++        else if (presented < 0)
++        {
++            ImGui::TextUnformatted("UNKNOWN");
++        }
++        else if (runtimeStatus != 0)
+         {
+-            ImGui::TextColored(toneMapColor(ImVec4(0.f, 1.f, 0.25f, 1.f)), std::format("ON {}x", count + 1).c_str());
++            ImGui::TextColored(toneMapColor(ImVec4(1.f, 0.f, 0.f, 1.f)), "ERROR 0x%X", runtimeStatus);
+         }
+         else
+         {
+-            ImGui::TextColored(toneMapColor(ImVec4(1.f, 0.f, 0.f, 1.f)), "OFF");
++            ImGui::TextColored(toneMapColor(ImVec4(0.f, 1.f, 0.25f, 1.f)), "ON (runtime ready)");
++        }
++        if (presented >= 0)
++        {
++            ImGui::Text("Presented since last poll: %d", presented);
++            ShowHelpMarker("Frames reported by Streamline since the previous query, including rendered frames. "
++                           "This is not the requested FG multiplier or an FPS measurement.");
+         }
+ 
+         bool fgActive = config->FGEnabled.value_or_default();
+         if (ImGui::Checkbox("Active##4", &fgActive))
+         {
+             config->FGEnabled = fgActive;
+-            LOG_DEBUG("Enabled set FGEnabled: {}", fgActive);
++            LOG_INFO("Enabled set FGEnabled: {}", fgActive);
+ 
+             if (config->FGEnabled.value_or_default())
+                 state.fgChanged = true;
+diff --git a/OptiScaler/misc/LifecycleAdapterV1.h b/OptiScaler/misc/LifecycleAdapterV1.h
+new file mode 100644
+index 00000000..8d52a5f5
+--- /dev/null
++++ b/OptiScaler/misc/LifecycleAdapterV1.h
+@@ -0,0 +1,18 @@
++#pragma once
++#include <atomic>
++#include <cstdint>
++
++// Callbacks run synchronously under the D3D11 feature lock. Registration replays existing handles.
++using OptiScalerLifecycleCallbackV2 = void (*)(uint32_t event, uint64_t handle);
++enum : uint32_t
++{
++    OptiScalerLifecycleCreatedV1 = 1,
++    OptiScalerLifecycleEvaluatedV1 = 2,
++    OptiScalerLifecycleReleasedV1 = 3
++};
++
++namespace LifecycleAdapterV1
++{
++inline std::atomic<bool> frameGenerationPaused { false };
++inline bool FrameGenerationPaused() { return frameGenerationPaused.load(std::memory_order_acquire); }
++}
+diff --git a/OptiScaler/proxies/NVNGX_Proxy.h b/OptiScaler/proxies/NVNGX_Proxy.h
+index 81d17a50..0913dcbd 100644
+--- a/OptiScaler/proxies/NVNGX_Proxy.h
++++ b/OptiScaler/proxies/NVNGX_Proxy.h
+@@ -764,11 +764,26 @@ class NVNGXProxy
+         return _module.D3D11_Shutdown;
+     }
+ 
++    static NVSDK_NGX_Result D3D11CoreShutdown1(ID3D11Device* InDevice)
++    {
++        // The driver core export writes a DWORD through its second argument.
++        // Keep the public SDK's single-argument signature at the proxy boundary.
++        using CoreShutdown1 = NVSDK_NGX_Result (*)(ID3D11Device*, unsigned int*);
++        unsigned int output = 0;
++        auto result = reinterpret_cast<CoreShutdown1>(_module.D3D11_Shutdown1)(InDevice, &output);
++        LOG_INFO("Driver core D3D11 Shutdown1 returned: {:X}, output: {}", (UINT) result, output);
++        return result;
++    }
++
+     static PFN_D3D11_Shutdown1 D3D11_Shutdown1()
+     {
+         if (!_dx11Inited)
+             return nullptr;
+ 
++        if (_module.D3D11_Shutdown1 != nullptr &&
++            _wcsicmp(std::filesystem::path(_module.filePath).filename().c_str(), L"_nvngx.dll") == 0)
++            return D3D11CoreShutdown1;
++
+         return _module.D3D11_Shutdown1;
+     }
+ 
+diff --git a/OptiScaler/upscalers/IFeature_Dx11wDx12.cpp b/OptiScaler/upscalers/IFeature_Dx11wDx12.cpp
+index 77d8a88c..418a20bc 100644
+--- a/OptiScaler/upscalers/IFeature_Dx11wDx12.cpp
++++ b/OptiScaler/upscalers/IFeature_Dx11wDx12.cpp
+@@ -8,6 +8,7 @@
+ #include <proxies/DXGI_Proxy.h>
+ #include <proxies/D3D12_Proxy.h>
+ #include <misc/IdentifyGpu.h>
++#include <dlssnr/DlssNrFeature_Dx12.h>
+ 
+ #include <with_dx12/with_dx12.h>
+ 
+@@ -105,6 +106,79 @@ void IFeature_Dx11wDx12::ReleaseSharedResources()
+     // SAFE_RELEASE(Dx12Device);
+ }
+ 
++bool IFeature_Dx11wDx12::WaitForGpuIdle()
++{
++    if (Dx12Fence == nullptr || Dx12FenceEvent == nullptr)
++    {
++        LOG_ERROR("Release: bridge fence is unavailable after command resource creation failed");
++        return false;
++    }
++
++    // Retirement may precede Present. Submit the D3D11 signals the bridge queue is waiting on.
++    if (auto* context = Dx11WithDx12::GetD3D11DeviceContext())
++        context->Flush();
++
++    const auto value = ++Dx12FenceValue;
++    auto result = Dx12CommandQueue->Signal(Dx12Fence, value);
++    if (FAILED(result))
++    {
++        LOG_ERROR("Release: queue Signal failed: {:X}", (UINT) result);
++        return false;
++    }
++    const auto completed = Dx12Fence->GetCompletedValue();
++    if (completed == UINT64_MAX)
++    {
++        LOG_ERROR("Release: device removed while waiting for GPU work");
++        return false;
++    }
++    if (completed < value)
++    {
++        result = Dx12Fence->SetEventOnCompletion(value, Dx12FenceEvent);
++        if (FAILED(result))
++        {
++            LOG_ERROR("Release: SetEventOnCompletion failed: {:X}", (UINT) result);
++            return false;
++        }
++        const auto waited = WaitForSingleObject(Dx12FenceEvent, INFINITE);
++        if (waited != WAIT_OBJECT_0)
++        {
++            LOG_ERROR("Release: fence wait failed: {:X}, Windows error: {}", (UINT) waited, GetLastError());
++            return false;
++        }
++    }
++    return true;
++}
++
++// Completed lists still retain recorded resource references. After the GPU wait, resetting the real
++// lists and notifying NR lets retired owners release those references before the inner feature is destroyed.
++bool IFeature_Dx11wDx12::ResetCompletedCommandLists()
++{
++    for (size_t i = 0; i < DX11WDX12_COMMAND_BUFFER_COUNT; ++i)
++    {
++        auto result = Dx12CommandAllocator[i]->Reset();
++        if (FAILED(result))
++        {
++            LOG_ERROR("Release: allocator {} Reset failed: {:X}", i, (UINT) result);
++            return false;
++        }
++        result = Dx12CommandList[i]->Reset(Dx12CommandAllocator[i], nullptr);
++        if (FAILED(result))
++        {
++            LOG_ERROR("Release: command list {} Reset failed: {:X}", i, (UINT) result);
++            return false;
++        }
++        DlssNr::FinishedPictureResetCommandList(Dx12CommandList[i]);
++        result = Dx12CommandList[i]->Close();
++        if (FAILED(result))
++        {
++            LOG_ERROR("Release: command list {} Close failed: {:X}", i, (UINT) result);
++            return false;
++        }
++        Dx12CommandAllocatorFenceValue[i] = 0;
++    }
++    return true;
++}
++
+ bool IFeature_Dx11wDx12::ProcessDx11Textures(const NVSDK_NGX_Parameter* InParameters)
+ {
+     HRESULT result;
+diff --git a/OptiScaler/upscalers/IFeature_Dx11wDx12.h b/OptiScaler/upscalers/IFeature_Dx11wDx12.h
+index bdf7a741..f3be9121 100644
+--- a/OptiScaler/upscalers/IFeature_Dx11wDx12.h
++++ b/OptiScaler/upscalers/IFeature_Dx11wDx12.h
+@@ -57,6 +57,8 @@ class IFeature_Dx11wDx12 : public virtual IFeature_Dx11
+                          D3D12_RESOURCE_STATES InBeforeState, D3D12_RESOURCE_STATES InAfterState);
+ 
+     void ReleaseSharedResources();
++    bool WaitForGpuIdle();
++    bool ResetCompletedCommandLists();
+ 
+     bool BaseInit(ID3D11Device* InDevice, ID3D11DeviceContext* InContext, NVSDK_NGX_Parameter* InParameters);
+ 
+diff --git a/OptiScaler/upscalers/IFeature_Dx12.cpp b/OptiScaler/upscalers/IFeature_Dx12.cpp
+index bfbc9d7e..3832efc3 100644
+--- a/OptiScaler/upscalers/IFeature_Dx12.cpp
++++ b/OptiScaler/upscalers/IFeature_Dx12.cpp
+@@ -7,6 +7,8 @@
+ #include "State.h"
+ #include <dlssnr/DlssNr_Pipeline_Dx12.h>
+ 
++static std::atomic<unsigned> featureInstances { 0 };
++
+ void IFeature_Dx12::ResourceBarrier(ID3D12GraphicsCommandList* InCommandList, ID3D12Resource* InResource,
+                                     D3D12_RESOURCE_STATES InBeforeState, D3D12_RESOURCE_STATES InAfterState) const
+ {
+@@ -426,10 +428,11 @@ void IFeature_Dx12::ReadDetailedGpuTimes(void* commandQueueVoid, std::vector<Det
+         detailedGpuTimes.emplace_back(DetailedGpuTime { Magnifier->Name(), magnifierTime.value(), false });
+ }
+ 
+-IFeature_Dx12::IFeature_Dx12(unsigned int InHandleId, NVSDK_NGX_Parameter* InParameters) {}
++IFeature_Dx12::IFeature_Dx12(unsigned int InHandleId, NVSDK_NGX_Parameter* InParameters) { ++featureInstances; }
+ 
+ IFeature_Dx12::~IFeature_Dx12()
+ {
++    const auto remainingInstances = --featureInstances;
+     if (State::Instance().isShuttingDown)
+     {
+         // Returning alone still runs unique_ptr destructors under the loader lock.
+@@ -442,7 +445,9 @@ IFeature_Dx12::~IFeature_Dx12()
+         return;
+     }
+ 
+-    Imgui.reset();
++    // DX12 features share ImGui until the last instance is destroyed.
++    if (remainingInstances == 0)
++        Imgui.reset();
+     OutputScaler.reset();
+     RCAS.reset();
+     Bias.reset();
+diff --git a/OptiScaler/upscalers/dlss/DLSSFeature_Dx11On12.cpp b/OptiScaler/upscalers/dlss/DLSSFeature_Dx11On12.cpp
+index 5af6eacc..d78aaf7d 100644
+--- a/OptiScaler/upscalers/dlss/DLSSFeature_Dx11On12.cpp
++++ b/OptiScaler/upscalers/dlss/DLSSFeature_Dx11On12.cpp
+@@ -16,3 +16,11 @@ DLSSFeatureDx11on12::DLSSFeatureDx11on12(unsigned int InHandleId, NVSDK_NGX_Para
+ {
+     dx12Feature = std::make_unique<DLSSFeatureDx12>(InHandleId, InParameters);
+ }
++
++bool DLSSFeatureDx11on12::PrepareForRelease()
++{
++    if (!WaitForGpuIdle())
++        return false;
++    dx12Feature->RetireNeuralRendering();
++    return ResetCompletedCommandLists();
++}
+diff --git a/OptiScaler/upscalers/dlss/DLSSFeature_Dx11On12.h b/OptiScaler/upscalers/dlss/DLSSFeature_Dx11On12.h
+index ee298d4d..6eb3ff45 100644
+--- a/OptiScaler/upscalers/dlss/DLSSFeature_Dx11On12.h
++++ b/OptiScaler/upscalers/dlss/DLSSFeature_Dx11On12.h
+@@ -9,13 +9,12 @@
+ // answering FAIL_FeatureNotSupported -- so choosing DLSS meant giving up the pass, and choosing the
+ // pass meant dropping to FSR or XeSS.
+ //
+-// The bridge base already converts the game's D3D11 textures into D3D12 resources and runs whatever
+-// D3D12 feature it is handed, so this is the same seventeen lines the FFX variant is: build a
+-// DLSSFeatureDx12 and give it to the bridge.
++// The bridge converts the game's textures into D3D12 resources.
+ class DLSSFeatureDx11on12 : public IFeature_Dx11wDx12
+ {
+   public:
+     Upscaler GetUpscalerType() const final { return Upscaler::DLSS_on12; }
+ 
+     DLSSFeatureDx11on12(unsigned int InHandleId, NVSDK_NGX_Parameter* InParameters);
++    bool PrepareForRelease();
+ };

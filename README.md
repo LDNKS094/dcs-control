@@ -4,11 +4,11 @@
 
 **DCS Control Expanded** adds two rendering modes to [DCS Control](https://github.com/NIGos/dcs-control).
 
-- **VDXR** with [Cheeky](https://github.com/LDNKS094/CheekyFoveatedDLSS)
+- **VDXR** with [Cheeky](https://github.com/ClarkCheekyKent/CheekyFoveatedDLSS)
   - Quad Views with head-tracked focus
   - Hybrid optical-flow frame generation
   - Neural rendering for both focus and peripheral views
-- **Desktop** with [OptiScaler NR](https://github.com/LDNKS094/OptiScaler-DLSSNR-PreSR-Multipass)
+- **Desktop** with [OptiScaler NR](https://github.com/wilsjo2/OptiScaler-DLSSNR-PreSR-Multipass)
   - Neural rendering, super resolution, and frame generation on a monitor
 
 ## Original README

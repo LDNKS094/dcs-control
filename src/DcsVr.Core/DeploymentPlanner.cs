@@ -207,7 +207,7 @@ public sealed class DeploymentPlanner(ComponentLocations components)
 
         if (profile.UsesOptiScaler)
         {
-            var source = RequireDirectory(components.OptiScalerDirectory, "Prepare the Desktop components with scripts/prepare-desktop-backend.ps1.");
+            var source = RequireDirectory(components.OptiScalerDirectory, "Reinstall DCS Control to restore the Desktop rendering components.");
             foreach (var file in OptiScalerBackend.ReadFiles(source))
             {
                 var path = PathPolicy.UnderRoot(source, file.Path);
