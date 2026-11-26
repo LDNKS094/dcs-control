@@ -119,7 +119,7 @@ internal sealed class WebBridge(ControlService service, Window? owner = null,
     private CancellationTokenSource? _downloadCancel;
     private (long Done, long Total)? _downloaded;
     private string? _updateMessage;
-    private static bool ManualUpdates =>
+    internal static bool ManualUpdates =>
 #if DCSCONTROL_MANUAL_UPDATES
         true;
 #else

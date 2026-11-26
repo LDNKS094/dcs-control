@@ -339,7 +339,9 @@ internal static class WebVerification
             // The update: the altered first download was deleted, the second kept with its signature; nothing else was fetched.
             var downloads = Directory.Exists(update.Updates.DownloadRoot) ? Directory.GetFiles(update.Updates.DownloadRoot, "*", SearchOption.AllDirectories).Select(Path.GetFileName).Order(StringComparer.Ordinal).ToArray() : [];
             var setupName = $"DcsControl-{update.Version}-Setup.exe";
-            if (!downloads.SequenceEqual([setupName, setupName + ".sig"]) || !update.Updates.VerifyFile(Path.Combine(update.Updates.DownloadRoot, update.Version, setupName)))
+            if (WebBridge.ManualUpdates && (downloads.Length != 0 || update.Handler.Requests.Any()))
+                throw new IOException("Manual updates contacted the update server or downloaded a setup.");
+            if (!WebBridge.ManualUpdates && (!downloads.SequenceEqual([setupName, setupName + ".sig"]) || !update.Updates.VerifyFile(Path.Combine(update.Updates.DownloadRoot, update.Version, setupName))))
                 throw new IOException("The update download did not end with only the verified setup: " + string.Join(", ", downloads));
             if (update.Handler.Requests.Any(r => !r.StartsWith("https://api.github.com/", StringComparison.Ordinal) && !r.StartsWith("https://github.com/NIGos/dcs-control/releases/download/", StringComparison.Ordinal)))
                 throw new IOException("The update asked another address: " + string.Join(", ", update.Handler.Requests));

@@ -77,25 +77,32 @@ window.runWebSmoke = async function() {
         && $('whatsNewDialog').querySelector('[data-support]').textContent.includes('Ko-fi') && document.querySelectorAll('[data-support]').length === 3);
       $('appVersionButton').click(); check("The rail's version number opens What's new again",await until(() => $('whatsNewDialog').open) && $('whatsNewTitle').textContent.includes(ui.state.version.split('-')[0]));
       $('whatsNewClose').click();
-      check('An available update shows a banner on the Overview and a dot on the version',await until(() => !$('updateBanner').hidden) && $('updateBannerText').textContent === `DCS Control ${short} is available`
-        && !$('railUpdate').hidden && ui.updates.update.version === next && ui.updates.update.canInstall && $('updateAuto').checked);
-      check('Drafts, malformed tags and older releases are never offered',!ui.updates.update.version.startsWith('99.') && $('updateCheckStatus').textContent.includes(short));
-      $('updateNotesOpen').click(); const box = $('updateNotes');
-      check("The update's release notes are escaped text with paragraphs and bullets",$('updateDialog').open && !box.querySelector('img, script') && window.notesInjected === undefined
-        && box.textContent.includes('<img src=x') && box.querySelector('b')?.textContent === 'Hostile notes check' && box.querySelectorAll('li').length === 3 && box.querySelector('li ul li')
-        && box.textContent.includes('First bullet with code') && box.textContent.includes('A link in a paragraph') && !box.textContent.includes('example.invalid'));
-      check('An unzipped copy says where the update installs and that this folder can be deleted',!ui.updates.portable || (!$('updatePortable').hidden && $('updatePortable').textContent.includes('can delete')));
-      await ui.installUpdate();
-      check('A download whose signature does not match is refused',$('updateStatus').textContent.includes('signature does not match') && $('updateStatus').classList.contains('error') && !$('updateInstall').disabled);
-      await ui.installUpdate();
-      check('A verified download hands over to the setup (offline: not started)',$('updateStatus').textContent.includes("signature was verified") && !$('updateStatus').classList.contains('error') && !$('updateProgressRow').hidden);
-      $('updateLater').click();
-      $('updateAuto').click();
-      check('Turning the update check off is saved and hides the banner',await until(() => ui.updates && !ui.updates.enabled) && $('updateBanner').hidden && $('railUpdate').hidden && !(await ui.request('updateStatus')).enabled);
-      $('updateAuto').click(); await until(() => ui.updates.enabled);
-      await ui.checkUpdates(true);
-      check('Check now finds the update again with the check back on',ui.updates.enabled && !$('updateBanner').hidden && $('updateAuto').checked);
-      $('updateHide').click(); check('The banner can be hidden until the next start',$('updateBanner').hidden && !$('railUpdate').hidden); }
+      if (ui.updates.manual) {
+        check('Manual updates link to fork releases and hide automatic update controls',
+          $('updateCheckNow').textContent === 'View fork releases' && $('updateAuto').closest('.setting').hidden
+          && $('updateBanner').hidden && $('railUpdate').hidden && !ui.updates.enabled && !ui.updates.update);
+      } else {
+        check('An available update shows a banner on the Overview and a dot on the version',await until(() => !$('updateBanner').hidden) && $('updateBannerText').textContent === `DCS Control ${short} is available`
+          && !$('railUpdate').hidden && ui.updates.update.version === next && ui.updates.update.canInstall && $('updateAuto').checked);
+        check('Drafts, malformed tags and older releases are never offered',!ui.updates.update.version.startsWith('99.') && $('updateCheckStatus').textContent.includes(short));
+        $('updateNotesOpen').click(); const box = $('updateNotes');
+        check("The update's release notes are escaped text with paragraphs and bullets",$('updateDialog').open && !box.querySelector('img, script') && window.notesInjected === undefined
+          && box.textContent.includes('<img src=x') && box.querySelector('b')?.textContent === 'Hostile notes check' && box.querySelectorAll('li').length === 3 && box.querySelector('li ul li')
+          && box.textContent.includes('First bullet with code') && box.textContent.includes('A link in a paragraph') && !box.textContent.includes('example.invalid'));
+        check('An unzipped copy says where the update installs and that this folder can be deleted',!ui.updates.portable || (!$('updatePortable').hidden && $('updatePortable').textContent.includes('can delete')));
+        await ui.installUpdate();
+        check('A download whose signature does not match is refused',$('updateStatus').textContent.includes('signature does not match') && $('updateStatus').classList.contains('error') && !$('updateInstall').disabled);
+        await ui.installUpdate();
+        check('A verified download hands over to the setup (offline: not started)',$('updateStatus').textContent.includes("signature was verified") && !$('updateStatus').classList.contains('error') && !$('updateProgressRow').hidden);
+        $('updateLater').click();
+        $('updateAuto').click();
+        check('Turning the update check off is saved and hides the banner',await until(() => ui.updates && !ui.updates.enabled) && $('updateBanner').hidden && $('railUpdate').hidden && !(await ui.request('updateStatus')).enabled);
+        $('updateAuto').click(); await until(() => ui.updates.enabled);
+        await ui.checkUpdates(true);
+        check('Check now finds the update again with the check back on',ui.updates.enabled && !$('updateBanner').hidden && $('updateAuto').checked);
+        $('updateHide').click(); check('The banner can be hidden until the next start',$('updateBanner').hidden && !$('railUpdate').hidden);
+      }
+    }
     check('One primary action: Launch DCS, with Review files, Apply without launching and Back to stock DCS as links',!$('preview') && !$('heroChips') && $('launch').classList.contains('launch') && $('reviewPlan').classList.contains('link-button') && $('apply').classList.contains('link-button') && $('apply').textContent === 'Apply without launching' && $('openRecovery').classList.contains('link-button') && !document.querySelector('.workflow').textContent.match(/Preview|Apply profile/));
     { const diff = listDiff(PROFILE_FIELDS,ui.fields.map(f => f.path));
       check('All editable profile controls available'+diff,!diff && document.querySelectorAll('#routeSwitch [data-route]').length === 5); }

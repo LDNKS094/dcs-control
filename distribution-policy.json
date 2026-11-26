@@ -6,6 +6,8 @@
     { "id": "manager", "delivery": "Bundled", "license": "GPL-3.0-or-later", "notice": "licenses/Manager-GPL-3.0.txt" },
     { "id": "ofxr", "delivery": "Bundled", "license": "LGPL-3.0-or-later", "notice": "licenses/OFXR-LGPL-3.0.txt", "additionalNotices": "Inside original OFXR ZIP" },
     { "id": "cheeky", "delivery": "Bundled", "license": "GPL-3.0", "notice": "licenses/Cheeky-GPL-3.0.txt", "additionalNotices": "licenses/Cheeky-dependencies" },
+    { "id": "cheeky-vdxr", "delivery": "Bundled", "license": "GPL-3.0", "notice": "licenses/cheeky-vdxr/Cheeky-GPLv3.txt", "additionalNotices": "licenses/cheeky-vdxr" },
+    { "id": "optiscaler-nr", "delivery": "Bundled", "license": "GPL-3.0", "notice": "licenses/optiscaler-nr/OptiScaler_LICENSE.txt", "additionalNotices": "licenses/optiscaler-nr" },
     { "id": "quadviews", "delivery": "Bundled", "license": "MIT", "notice": "licenses/QuadViews-MIT.txt", "additionalNotices": "licenses/QuadViews-THIRD-PARTY.txt" },
     { "id": "sboys", "delivery": "OfficialDownloadOrImport", "reason": "Release contains private functionality; no redistribution grant established for those binaries.", "url": "https://github.com/sboys3/CustomHeadsetOpenVR/releases/tag/1.3.0" },
     { "id": "nvidia-dlssnr", "delivery": "UserSupplied", "reason": "Proprietary neural runtime; not included." },

@@ -5,6 +5,8 @@
 | OFXR Bridge | 0.2.1 / `dad56acafc6e1dde219940427738b926cf2ea555` | Original release ZIP; LGPL-3.0-or-later |
 | OFXR Bridge (djules75 fork) | 0.2.9.1 / `8cdee48ec97afc41cff0a48c68a44566643c9943` (https://github.com/djules75/OFXR-Bridge) | Source build by `scripts/build-ofxr-djules75.ps1`, shipped in `components/ofxr` and used for every framegen profile (DCS's second-thread xrWaitFrame deadlocks upstream 0.2.1); LGPL-3.0-or-later, source in the corresponding-source archive under `upstream/ofxr-djules75` |
 | CheekyFoveatedDLSS | 0.5.4 / `d6c18b23d31f7339735114c621bc3f9066e1a32d` | Original standalone ZIP/loaders; modified source-built host/runtime and matching OpenXR layer for focus profiles; GPL-3.0 |
+| CheekyFoveatedDLSS (VDXR) | `scripts/integration-backends.json` | Patched backend for Virtual Desktop. GPL-3.0; component notices in `licenses/cheeky-vdxr`. |
+| OptiScaler NR | `scripts/integration-backends.json` | Patched Desktop backend. GPL-3.0; vendor components are pinned in `scripts/desktop-backend-runtime.json`, with notices in `licenses/optiscaler-nr`. |
 | Quad-Views-Foveated | 1.1.3 / `957ff0327185ea29acc41fc86c4cdc3caf428fb9` | Locally compiled provider; MIT |
 | Sboys CustomHeadsetOpenVR | 1.3.0 / `21185da63a9e4307ae876b3702a43a43044d451c` | Official download/import only; GPL-2.0 source plus separate private binary functionality |
 | FidelityFX SDK | 1.1.4 / `c6efa6bf7f2027b3ec94f28578bb5965eabb9e55` | OFXR source build dependency; MIT |
@@ -20,11 +22,11 @@ The NVIDIA DLSS 5 runtime is user-supplied and is not redistributed here. The so
 
 The local Cheeky modifications add opt-in focus-pair view selection, resource/copy routing, array/bounds checks, history recovery, adjusted downstream extension probing and corresponding tests. `scripts/patch-cheeky.py` applies them to the pinned base. The binary distribution includes hashes for the modified components. Their complete corresponding source and dependencies are in the matching 0.4.0 source archive, with base revisions and modification notices. Standard stereo profiles keep original upstream host/runtime binaries and use the matching locally built layer with the adapter disabled. [Adapter documentation](QUAD_FOCUS_ADAPTER.md).
 
-FidelityFX build scripts contain compatibility fixes for Ninja and shader output dependency names. These do not change shaders or rendering algorithms. Corresponding source snapshots, dependencies, and build scripts are supplied separately with this local preview. For the public release the binary ZIP ships only the components listed above under their licences, with the complete corresponding source in the matching sources ZIP; proprietary NVIDIA, Pimax, SteamVR and Sboys binaries are not redistributed.
+The matching source ZIP includes the manager, build scripts, source snapshots and patches. The VDXR and Desktop backends use their pinned upstream snapshots and the patch series under `manager/patches`.
 
 ## 0.4.0 distribution audit
 
-`distribution-policy.json` records each delivery method. Sboys binaries, NVIDIA neural DLLs, Pimax and SteamVR installers are absent from the binary ZIP. Sboys source documents private DRM-related functionality without an established binary redistribution grant; users obtain the original release directly. The archived gaze bridge is not bundled and Crystal Super compatibility remains a live requirement.
+`distribution-policy.json` records each delivery method. Users supply the NR runtime and obtain the Sboys release, Pimax and SteamVR separately. Bundled SR, FG and Streamline binaries are listed in `scripts/desktop-backend-runtime.json`.
 
 OFXR retains its original LGPL/GPL and third-party notices inside its ZIP. Its NVIDIA optical-flow headers have their notice there; nvofapi64.dll is provided by the installed NVIDIA driver and is not bundled. Cheeky dependency notices, Quad Views THIRD_PARTY, OpenXR MixedReality NOTICE and Windows Implementation Library notices accompany the modified binaries. The matching source ZIP must accompany binary redistribution. General-purpose SDK executables, DLLs, binary libraries and debug symbols are omitted from the source ZIP: obtain MSVC / Windows SDK and FidelityFX 1.1.4 tools from their official distributions, then overlay these modified source snapshots. All renderer source and shader changes remain included. `UPSTREAM_REVISIONS.json` pins the base revisions.
 

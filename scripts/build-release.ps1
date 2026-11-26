@@ -42,7 +42,7 @@ New-Item -ItemType Directory -Path $payloadRoot -Force | Out-Null
 $launcher = & (Join-Path $PSScriptRoot 'build-launcher.ps1') | Select-Object -Last 1
 Copy-Item -LiteralPath $launcher -Destination (Join-Path $releaseRoot 'DcsControl.exe') -Force
 foreach ($project in @('src/DcsVr.App','src/DcsVr.Cli')) {
-    $publishOptions = @('-c','Release','-r','win-x64','--self-contained','true','-o',$payloadRoot,'-p:DebugType=None','-p:DebugSymbols=false','--nologo')
+    $publishOptions = @('-c','Release','-r','win-x64','--self-contained','true','-o',$payloadRoot,'-p:DebugType=None','-p:DebugSymbols=false','-p:DcsControlManualUpdates=true','--nologo')
     if ($NoRestore) { $publishOptions += '--no-restore' }
     & $dotnet publish (Join-Path $workspaceRoot $project) @publishOptions
     if ($LASTEXITCODE -ne 0) { throw 'Publish failed.' }
@@ -76,6 +76,7 @@ try {
         (Get-FileHash -LiteralPath $target -Algorithm SHA256).Hash.ToLowerInvariant() | Set-Content -LiteralPath ($target + '.sha256') -Encoding ascii
     }
 } finally { $cheekyZip.Dispose() }
+& (Join-Path $PSScriptRoot 'build-render-backends.ps1') -DistributionRoot $payloadRoot
 foreach ($archive in @('OFXR-Bridge-v0.2.1-V116.zip')) {
     Copy-Item -LiteralPath (Join-Path $workspaceRoot ".cache/packages/$archive") -Destination (Join-Path $payloadRoot 'packages') -Force
 }
