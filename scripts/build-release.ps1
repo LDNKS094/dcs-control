@@ -1,7 +1,7 @@
 #Requires -Version 7
 # -Sign: a release for publishing; it fails when the release signing key is missing (without it, a developer build
 # warns and leaves the setup and ZIP unsigned).
-param([switch]$NoRestore, [switch]$Sign)
+param([switch]$NoRestore, [switch]$Sign, [switch]$ForkPreview)
 $ErrorActionPreference = 'Stop'
 $workspaceRoot = Split-Path -Parent $PSScriptRoot
 $env:DOTNET_CLI_TELEMETRY_OPTOUT='1'
@@ -42,7 +42,8 @@ New-Item -ItemType Directory -Path $payloadRoot -Force | Out-Null
 $launcher = & (Join-Path $PSScriptRoot 'build-launcher.ps1') | Select-Object -Last 1
 Copy-Item -LiteralPath $launcher -Destination (Join-Path $releaseRoot 'DcsControl.exe') -Force
 foreach ($project in @('src/DcsVr.App','src/DcsVr.Cli')) {
-    $publishOptions = @('-c','Release','-r','win-x64','--self-contained','true','-o',$payloadRoot,'-p:DebugType=None','-p:DebugSymbols=false','-p:DcsControlManualUpdates=true','--nologo')
+    $publishOptions = @('-c','Release','-r','win-x64','--self-contained','true','-o',$payloadRoot,'-p:DebugType=None','-p:DebugSymbols=false','--nologo')
+    if ($ForkPreview) { $publishOptions += '-p:DcsControlManualUpdates=true' }
     if ($NoRestore) { $publishOptions += '--no-restore' }
     & $dotnet publish (Join-Path $workspaceRoot $project) @publishOptions
     if ($LASTEXITCODE -ne 0) { throw 'Publish failed.' }

@@ -4,7 +4,7 @@ param([string]$Output, [switch]$IncludeVdxr)
 $ErrorActionPreference = 'Stop'
 $workspaceRoot = Split-Path -Parent $PSScriptRoot
 if (-not $Output) { $Output = Join-Path $workspaceRoot 'artifacts/desktop-dev' }
-& dotnet publish (Join-Path $workspaceRoot 'src/DcsVr.App/DcsVr.App.csproj') -c Release -r win-x64 --self-contained false -p:DcsControlManualUpdates=true -o $Output --nologo
+& dotnet publish (Join-Path $workspaceRoot 'src/DcsVr.App/DcsVr.App.csproj') -c Release -r win-x64 --self-contained false -o $Output --nologo
 if ($LASTEXITCODE -ne 0) { throw 'Desktop development app build failed.' }
 if ($IncludeVdxr) {
     & (Join-Path $PSScriptRoot 'build-render-backends.ps1') -DistributionRoot $Output

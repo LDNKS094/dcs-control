@@ -29,4 +29,4 @@ The build applies the backend patches in separate worktrees and generates Cheeky
 
 Open `artifacts/integration/DcsControl.exe` to test a development build. For distribution, use the upstream release pipeline in `scripts/build-release.ps1`. It packages the rendering backends under `files/components` alongside the other components.
 
-Get updates manually from the [fork’s Releases page](https://github.com/LDNKS094/dcs-control/releases).
+For a fork preview, run `./scripts/build-release.ps1 -ForkPreview`. This build uses manual updates from the [fork’s Releases page](https://github.com/LDNKS094/dcs-control/releases). Standard builds use the upstream updater.
